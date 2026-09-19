@@ -10,6 +10,7 @@ EXPLAIN_URL = "http://localhost:5000/api/explain"
 IMAGE_URL = "http://localhost:5000/api/analyze-image"
 DOC_URL = "http://localhost:5000/api/analyze-doc"
 TTS_URL = "http://localhost:5000/api/tts"
+VOICE_TRANSCRIBE_URL = "http://localhost:5000/api/voice/transcribe"
 
 # Streamlit Page Configuration - Clean, Centered, Professional
 st.set_page_config(
@@ -246,6 +247,32 @@ def play_audio_response(msg_idx: int, text_content: str, selected_lang: str):
     except Exception as e:
         st.error(f"TTS connection error: {e}")
 
+# Function to submit voice audio to /api/voice/transcribe REST endpoint
+def submit_voice_transcription(audio_bytes: bytes, selected_lang: str):
+    if not audio_bytes:
+        return
+
+    try:
+        files = {'file': ('recording.wav', audio_bytes, 'audio/wav')}
+        data = {'language': selected_lang}
+        response = requests.post(VOICE_TRANSCRIBE_URL, files=files, data=data, timeout=15)
+
+        if response.status_code == 200:
+            res_data = response.json()
+            if res_data.get("success"):
+                transcribed_text = res_data.get("text", "").strip()
+                if transcribed_text:
+                    st.session_state.input_box_value = transcribed_text
+                    submit_question(transcribed_text, selected_lang)
+                else:
+                    st.session_state.error_message = "Unable to understand voice recording. Please speak clearly or type your question."
+            else:
+                st.session_state.error_message = res_data.get("message", "Unable to understand voice recording.")
+        else:
+            st.session_state.error_message = "Unable to understand voice recording. Please speak clearly or type your question."
+    except Exception:
+        st.session_state.error_message = "Unable to connect to voice transcription service. Please try typing your question."
+
 # Function to submit chat question to Flask REST API
 def submit_question(user_query: str, selected_lang: str, category_name: str = "general"):
     if not user_query or not user_query.strip():
@@ -440,11 +467,15 @@ with tab1:
     st.markdown('<div class="section-title">How can I help you today?</div>', unsafe_allow_html=True)
     
     # 🎙️ Audio Input / Voice Communication
-    st.markdown("**🎙️ Speak your question (Voice Input):**")
+    st.markdown("**🎙️ Speak to SeniorEase:**")
     try:
         audio_val = st.audio_input("Record voice question", key="voice_recorder")
         if audio_val:
-            st.info("🎙️ Voice recorded! Click 'Ask SeniorEase' or type additional notes below.")
+            st.info("🎙️ Voice recorded! Click 'Ask Voice Question' below to submit.")
+            if st.button("🎙️ Ask Voice Question", key="voice_submit_btn"):
+                with st.spinner("⏳ Converting your voice to text..."):
+                    submit_voice_transcription(audio_val.getvalue(), selected_language)
+                    st.rerun()
     except Exception:
         pass
 

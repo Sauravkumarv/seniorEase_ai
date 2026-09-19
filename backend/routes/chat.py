@@ -277,3 +277,65 @@ def tts():
             "success": False,
             "message": f"An unexpected error occurred: {str(e)}"
         }), 500
+
+@chat_bp.route('/voice/transcribe', methods=['POST'])
+def voice_transcribe():
+    """
+    Voice Transcription Endpoint.
+    Converts user speech audio to text using configured Speech-to-Text service.
+    Accepts audio file upload via multipart/form-data or JSON payload with base64 audio.
+    """
+    try:
+        audio_bytes = None
+        filename = "audio.wav"
+        language = "English"
+
+        # 1. Check multipart form file upload
+        if 'file' in request.files:
+            file_obj = request.files['file']
+            audio_bytes = file_obj.read()
+            filename = file_obj.filename or "audio.wav"
+            language = request.form.get("language", "English")
+        elif 'audio' in request.files:
+            file_obj = request.files['audio']
+            audio_bytes = file_obj.read()
+            filename = file_obj.filename or "audio.wav"
+            language = request.form.get("language", "English")
+        # 2. Check JSON payload with base64 audio string
+        elif request.is_json and request.get_json():
+            data = request.get_json()
+            audio_b64 = data.get("audio_base64", "").strip() or data.get("audio_b64", "").strip()
+            if audio_b64:
+                import base64
+                audio_bytes = base64.b64decode(audio_b64)
+            filename = data.get("filename", "audio.wav")
+            language = data.get("language", "English")
+
+        if not audio_bytes:
+            return jsonify({
+                "success": False,
+                "message": "No audio file or data provided. Please record your voice and try again."
+            }), 400
+
+        result = ai_service.transcribe_audio(
+            audio_bytes=audio_bytes,
+            filename=filename,
+            language=language
+        )
+
+        if not result.get("success"):
+            return jsonify({
+                "success": False,
+                "message": result.get("error", "Unable to transcribe audio. Please try speaking clearly or typing your question.")
+            }), 500
+
+        return jsonify({
+            "success": True,
+            "text": result.get("text", "")
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": "Unable to transcribe voice recording. Please try speaking clearly or typing your question."
+        }), 500
