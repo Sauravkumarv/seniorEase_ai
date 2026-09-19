@@ -9,6 +9,9 @@ from typing import Dict, Any
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# In-memory document session storage: doc_id -> metadata & chunks
+DOCUMENT_STORE: Dict[str, Any] = {}
+
 # Master System Prompt for SeniorEase AI Chat
 SENIOR_EASE_SYSTEM_PROMPT = """
 ROLE:
@@ -235,19 +238,137 @@ class AIService:
         except Exception:
             return ""
 
-    def analyze_document(self, document_text: str, question: str = "", language: str = "English") -> Dict[str, Any]:
+    def upload_document(self, file_bytes: bytes, filename: str) -> Dict[str, Any]:
         """
-        Analyzes extracted document text (PDF or TXT) and answers senior user questions.
+        Extracts text from PDF, DOCX, or TXT file, splits into chunks, and creates an in-memory document store.
+        Returns document metadata without storing files permanently on disk.
         """
-        if not document_text or not document_text.strip():
-            return {
-                "success": False,
-                "error": "Document content is empty."
+        if not file_bytes:
+            return {"success": False, "error": "File content is required."}
+
+        filename_lower = filename.lower()
+        extracted_text = ""
+        page_count = 1
+
+        try:
+            if filename_lower.endswith(".pdf"):
+                import pypdf
+                pdf_reader = pypdf.PdfReader(io.BytesIO(file_bytes))
+                page_count = len(pdf_reader.pages) or 1
+                for page in pdf_reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        extracted_text += text + "\n"
+
+            elif filename_lower.endswith(".docx"):
+                import docx
+                doc_obj = docx.Document(io.BytesIO(file_bytes))
+                extracted_text = "\n".join([p.text for p in doc_obj.paragraphs if p.text])
+                page_count = max(1, len(doc_obj.paragraphs) // 15)
+
+            else:
+                extracted_text = file_bytes.decode('utf-8', errors='ignore')
+                page_count = max(1, len(extracted_text) // 2000)
+
+            extracted_text = extracted_text.strip()
+            if not extracted_text:
+                return {"success": False, "error": "Could not extract readable text from document."}
+
+            # Split document text into lightweight chunks (~600 chars each)
+            chunks = self._chunk_text(extracted_text, chunk_size=600, overlap=100)
+
+            import uuid
+            doc_id = f"doc_{uuid.uuid4().hex[:8]}"
+            DOCUMENT_STORE[doc_id] = {
+                "document_id": doc_id,
+                "filename": filename,
+                "page_count": page_count,
+                "text_length": len(extracted_text),
+                "chunks": chunks
             }
 
+            return {
+                "success": True,
+                "document_id": doc_id,
+                "filename": filename,
+                "page_count": page_count,
+                "text_length": len(extracted_text)
+            }
+
+        except Exception as e:
+            logger.error(f"Error processing document upload: {e}")
+            return {"success": False, "error": f"Failed to process document: {str(e)}"}
+
+    def _chunk_text(self, text: str, chunk_size: int = 600, overlap: int = 100) -> list:
+        """
+        Splits long document text into overlapping chunks for lightweight retrieval.
+        """
+        chunks = []
+        start = 0
+        text_len = len(text)
+        while start < text_len:
+            end = min(start + chunk_size, text_len)
+            chunk = text[start:end].strip()
+            if chunk:
+                chunks.append(chunk)
+            start += chunk_size - overlap
+        return chunks
+
+    def retrieve_relevant_snippet(self, doc_id: str, query: str) -> str:
+        """
+        Finds ONLY the relevant chunk(s) of the document using keyword relevance scoring.
+        Limits token usage by sending only top 1-2 chunks to the LLM.
+        """
+        if doc_id not in DOCUMENT_STORE:
+            return ""
+
+        doc_info = DOCUMENT_STORE[doc_id]
+        chunks = doc_info.get("chunks", [])
+        if not chunks:
+            return ""
+
+        if not query or not query.strip():
+            return "\n\n".join(chunks[:2])
+
+        words = set(re.findall(r'\w+', query.lower()))
+        scored_chunks = []
+
+        for idx, chunk in enumerate(chunks):
+            chunk_lower = chunk.lower()
+            score = sum(1 for w in words if len(w) > 2 and w in chunk_lower)
+            scored_chunks.append((score, idx, chunk))
+
+        scored_chunks.sort(key=lambda x: x[0], reverse=True)
+        top_chunks = [item[2] for item in scored_chunks[:2] if item[0] > 0]
+        if not top_chunks:
+            top_chunks = chunks[:2]
+
+        return "\n\n".join(top_chunks)
+
+    def analyze_document(self, document_text: str = "", question: str = "", language: str = "English", document_id: str = "") -> Dict[str, Any]:
+        """
+        Analyzes extracted document text using lightweight chunk retrieval to strictly limit token consumption.
+        """
+        snippet = ""
+        if document_id and document_id in DOCUMENT_STORE:
+            snippet = self.retrieve_relevant_snippet(document_id, question)
+        elif document_text:
+            temp_chunks = self._chunk_text(document_text, chunk_size=600, overlap=100)
+            if question and question.strip():
+                words = set(re.findall(r'\w+', question.lower()))
+                scored = [(sum(1 for w in words if len(w) > 2 and w in c.lower()), c) for c in temp_chunks]
+                scored.sort(key=lambda x: x[0], reverse=True)
+                top = [c[1] for c in scored[:2] if c[0] > 0]
+                snippet = "\n\n".join(top) if top else "\n\n".join(temp_chunks[:2])
+            else:
+                snippet = "\n\n".join(temp_chunks[:2])
+
+        if not snippet:
+            return {"success": False, "error": "Document content or relevant section not found."}
+
         doc_prompt = (
-            f"Here is an uploaded document content:\n\n{document_text[:3000]}\n\n"
-            f"User Question: {question if question.strip() else 'Please summarize this document and highlight key actions for me.'}"
+            f"RELEVANT DOCUMENT EXCERPT:\n{snippet}\n\n"
+            f"User Question: {question if question.strip() else 'Please summarize this document section clearly for me.'}"
         )
 
         return self.generate_response(user_message=doc_prompt, language=language)

@@ -176,16 +176,59 @@ def analyze_image():
             "message": f"An unexpected error occurred: {str(e)}"
         }), 500
 
+@chat_bp.route('/document/upload', methods=['POST'])
+def document_upload():
+    """
+    Document Upload Endpoint for PDF, DOCX, TXT.
+    Extracts text, creates lightweight in-memory representation, and returns metadata.
+    """
+    try:
+        file_bytes = None
+        filename = "document.txt"
+
+        if 'file' in request.files:
+            file_obj = request.files['file']
+            file_bytes = file_obj.read()
+            filename = file_obj.filename or "document.txt"
+        elif 'document' in request.files:
+            file_obj = request.files['document']
+            file_bytes = file_obj.read()
+            filename = file_obj.filename or "document.txt"
+
+        if not file_bytes:
+            return jsonify({
+                "success": False,
+                "message": "The 'file' or 'document' parameter is required."
+            }), 400
+
+        result = ai_service.upload_document(file_bytes=file_bytes, filename=filename)
+
+        if not result.get("success"):
+            return jsonify({
+                "success": False,
+                "message": result.get("error", "Failed to process document.")
+            }), 500
+
+        return jsonify({
+            "success": True,
+            "document_id": result.get("document_id"),
+            "filename": result.get("filename"),
+            "page_count": result.get("page_count"),
+            "text_length": result.get("text_length")
+        }), 200
+
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "message": f"An unexpected error occurred during document upload: {str(e)}"
+        }), 500
+
 @chat_bp.route('/analyze-doc', methods=['POST'])
 def analyze_doc():
     """
-    Document Analysis Endpoint for PDF/TXT files.
-    Expects JSON payload:
-    {
-        "document_text": "Extracted text content",
-        "question": "Optional user question",
-        "language": "English | Hindi | Hinglish"
-    }
+    Document Analysis Endpoint for PDF, DOCX, and TXT files.
+    Accepts document_id (from /api/document/upload) or document_text.
+    Uses lightweight chunk retrieval to limit token consumption.
     """
     try:
         data = request.get_json()
@@ -196,20 +239,22 @@ def analyze_doc():
                 "message": "Invalid JSON request payload."
             }), 400
 
+        document_id = data.get("document_id", "").strip()
         document_text = data.get("document_text", "").strip()
         question = data.get("question", "").strip()
         language = data.get("language", "English")
 
-        if not document_text:
+        if not document_id and not document_text:
             return jsonify({
                 "success": False,
-                "message": "The 'document_text' field is required."
+                "message": "Either 'document_id' or 'document_text' is required."
             }), 400
 
         result = ai_service.analyze_document(
             document_text=document_text,
             question=question,
-            language=language
+            language=language,
+            document_id=document_id
         )
 
         if not result.get("success"):

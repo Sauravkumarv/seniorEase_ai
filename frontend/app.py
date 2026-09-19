@@ -9,6 +9,7 @@ BACKEND_URL = "http://localhost:5000/api/chat"
 EXPLAIN_URL = "http://localhost:5000/api/explain"
 IMAGE_URL = "http://localhost:5000/api/analyze-image"
 DOC_URL = "http://localhost:5000/api/analyze-doc"
+DOC_UPLOAD_URL = "http://localhost:5000/api/document/upload"
 TTS_URL = "http://localhost:5000/api/tts"
 VOICE_TRANSCRIBE_URL = "http://localhost:5000/api/voice/transcribe"
 VOICE_SPEAK_URL = "http://localhost:5000/api/voice/speak"
@@ -383,8 +384,6 @@ def submit_image_analysis(image_b64: str, mime_type: str, prompt_text: str, sele
                     "role": "assistant",
                     "content": analysis
                 })
-            else:
-                st.session_state.error_message = data.get("message", "Unable to analyze image.")
         else:
             st.session_state.error_message = (
                 "Unable to connect to the assistant. Please make sure the Flask server is running."
@@ -395,15 +394,16 @@ def submit_image_analysis(image_b64: str, mime_type: str, prompt_text: str, sele
             "Unable to connect to the assistant. Please make sure the Flask server is running."
         )
 
-# Function to submit document for analysis
-def submit_doc_analysis(doc_text: str, doc_name: str, user_question: str, selected_lang: str):
+# Function to submit document question for analysis
+def submit_doc_analysis(doc_id: str, doc_name: str, user_question: str, selected_lang: str, doc_text: str = ""):
     st.session_state.conversation_history.append({
         "role": "user",
-        "content": f"📄 Document Analysis ({doc_name}):\n{user_question if user_question else 'Please summarize and explain this document.'}"
+        "content": f"📄 Document Question ({doc_name}):\n{user_question if user_question else 'Please summarize and explain this document.'}"
     })
 
     try:
         payload = {
+            "document_id": doc_id,
             "document_text": doc_text,
             "question": user_question,
             "language": selected_lang
@@ -424,7 +424,6 @@ def submit_doc_analysis(doc_text: str, doc_name: str, user_question: str, select
             st.session_state.error_message = (
                 "Unable to connect to the assistant. Please make sure the Flask server is running."
             )
-
     except requests.exceptions.RequestException:
         st.session_state.error_message = (
             "Unable to connect to the assistant. Please make sure the Flask server is running."
@@ -692,10 +691,10 @@ with tab2:
                 submit_image_analysis(img_b64, mime_type, image_prompt, selected_language)
                 st.rerun()
 
-# --- TAB 3: DOCUMENT READER & Q&A ---
+# --- TAB 3: ASK ABOUT A DOCUMENT ---
 with tab3:
-    st.markdown('<div class="section-title">📄 Upload Document (PDF / Text)</div>', unsafe_allow_html=True)
-    st.info("💡 Upload pension forms, bank statements, or official PDF notices.")
+    st.markdown('<div class="section-title">📄 Ask About a Document</div>', unsafe_allow_html=True)
+    st.info("💡 Upload pension forms, bank statements, or official notices (PDF, DOCX, TXT). We retrieve only relevant sections to keep answers fast and clear.")
 
     uploaded_doc = st.file_uploader(
         "Select PDF, DOCX or Text document file:",
@@ -705,41 +704,43 @@ with tab3:
 
     doc_question = st.text_area(
         label="What question do you have about this document?",
-        placeholder="e.g., What is the last date to submit this form?",
+        placeholder="e.g., What is the last date to submit this form? Or what is the total amount due?",
         height=100,
         key="doc_question_area"
     )
 
     if uploaded_doc is not None:
-        st.success(f"📄 Loaded document: {uploaded_doc.name}")
+        doc_bytes = uploaded_doc.getvalue()
+        doc_id_key = f"uploaded_doc_id_{hash(doc_bytes)}"
 
-        if st.button("Analyze Document", key="doc_button"):
-            with st.spinner("⏳ SeniorEase AI is reading your document..."):
+        if doc_id_key not in st.session_state:
+            with st.spinner("⏳ Uploading document & creating lightweight index..."):
                 try:
-                    doc_bytes = uploaded_doc.getvalue()
-                    doc_text = ""
-
-                    if uploaded_doc.name.lower().endswith(".pdf"):
-                        pdf_reader = pypdf.PdfReader(io.BytesIO(doc_bytes))
-                        for page in pdf_reader.pages:
-                            text = page.extract_text()
-                            if text:
-                                doc_text += text + "\n"
-                    elif uploaded_doc.name.lower().endswith(".docx"):
-                        import docx
-                        doc_obj = docx.Document(io.BytesIO(doc_bytes))
-                        doc_text = "\n".join([p.text for p in doc_obj.paragraphs if p.text])
+                    files = {'file': (uploaded_doc.name, doc_bytes, uploaded_doc.type or 'application/octet-stream')}
+                    res = requests.post(DOC_UPLOAD_URL, files=files, timeout=15)
+                    if res.status_code == 200 and res.json().get("success"):
+                        doc_info = res.json()
+                        st.session_state[doc_id_key] = doc_info
                     else:
-                        doc_text = doc_bytes.decode('utf-8', errors='ignore')
-
-                    if doc_text.strip():
-                        submit_doc_analysis(doc_text, uploaded_doc.name, doc_question, selected_language)
-                        st.rerun()
-                    else:
-                        st.error("Could not extract readable text from this document file.")
-
+                        st.session_state[doc_id_key] = {"error": "Could not upload document."}
                 except Exception as e:
-                    st.error(f"Error processing document file: {e}")
+                    st.session_state[doc_id_key] = {"error": str(e)}
+
+        doc_info = st.session_state.get(doc_id_key, {})
+        if doc_info and "document_id" in doc_info:
+            st.success(f"📄 Loaded document: {doc_info['filename']} ({doc_info['page_count']} pages, {doc_info['text_length']:,} characters)")
+
+            if st.button("Ask About Document", key="doc_button"):
+                with st.spinner("⏳ Finding relevant section & answering your question..."):
+                    submit_doc_analysis(
+                        doc_id=doc_info["document_id"],
+                        doc_name=doc_info["filename"],
+                        user_question=doc_question,
+                        selected_lang=selected_language
+                    )
+                    st.rerun()
+        elif doc_info and "error" in doc_info:
+            st.error(f"Document processing issue: {doc_info['error']}")
 
 # --- TAB 4: EXPLAIN SOMETHING SIMPLY ---
 with tab4:
