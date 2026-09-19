@@ -97,6 +97,7 @@ Important Warnings / Deadlines:
 """
 
 # System Prompt for Image & Photo Analysis
+# System Prompt for Image & Photo Analysis
 IMAGE_SYSTEM_PROMPT = """
 ROLE:
 You are SeniorEase AI, analyzing an uploaded image/photo for a senior citizen.
@@ -124,6 +125,10 @@ RULES FOR EVERY UPLOADED IMAGE:
 6. Explain difficult terms simply when they appear.
 7. Mention important dates, due dates, or warnings when clearly visible.
 8. NEVER invent missing information. Never guess.
+
+IF SECRET CREDENTIALS DETECTED:
+If the image contains an OTP, PIN, password, CVV, or secret code, DO NOT process or repeat the secret. Instead say:
+"Please remove sensitive credentials before uploading this file."
 
 IF UNCLEAR CONTENT:
 If the content or image is blurry, corrupted, unreadable, or unclear, say exactly:
@@ -164,6 +169,10 @@ RULES FOR EVERY UPLOADED DOCUMENT:
 6. Explain difficult terms simply when they appear.
 7. Mention important dates, due dates, or warnings when clearly visible.
 8. NEVER invent missing information. Never guess.
+
+IF SECRET CREDENTIALS DETECTED:
+If the document contains an OTP, PIN, password, CVV, or secret code, DO NOT process or repeat the secret. Instead say:
+"Please remove sensitive credentials before uploading this file."
 
 IF UNCLEAR CONTENT:
 If the document content is corrupted, unreadable, or unclear, say exactly:
@@ -255,6 +264,26 @@ class AIService:
 
         return self._generate_mock_explain(cleaned_text, language)
 
+    def _contains_secret_credentials(self, text: str) -> bool:
+        """
+        Detects if text contains secret credentials such as OTP, ATM/UPI PIN, password, CVV, or secret codes.
+        Returns True if secret credentials are detected.
+        """
+        if not text:
+            return False
+        lowered = text.lower()
+        secret_keywords = [
+            "otp", "atm pin", "upi pin", "cvv", "cvc", "password", "passcode",
+            "secret code", "card pin", "one time password", "one-time password",
+            "credit card pin", "debit card pin", "security code"
+        ]
+        
+        found_kw = any(kw in lowered for kw in secret_keywords)
+        has_number = bool(re.search(r'\b\d{3,8}\b', text))
+        has_secret_context = any(w in lowered for w in ["my", "is", "code", "pin", "otp", "password", "cvv", ":", "="])
+
+        return found_kw and (has_number or has_secret_context)
+
     def analyze_image(self, image_b64: str, mime_type: str = "image/jpeg", prompt: str = "", language: str = "English") -> Dict[str, Any]:
         """
         Analyzes images (medicine labels, bills, receipts, notices) for senior users using Gemini Vision or mock generator.
@@ -263,6 +292,16 @@ class AIService:
             return {
                 "success": False,
                 "error": "Image data is required."
+            }
+
+        # Privacy & Secret Credentials Filter
+        ocr_text = self._extract_ocr_text(image_b64) if image_b64 else ""
+        if self._contains_secret_credentials(prompt) or self._contains_secret_credentials(ocr_text):
+            logger.warning("Secret credentials detected in image analysis request. Intercepted by privacy filter.")
+            return {
+                "success": True,
+                "response": "Please remove sensitive credentials before uploading this file.",
+                "provider": "privacy_filter"
             }
 
         is_mock_key = not self.api_key or self.api_key.lower() in ["mock", "your_api_key_here", "none"]
@@ -325,6 +364,14 @@ class AIService:
             if not extracted_text:
                 return {"success": False, "error": "Could not extract readable text from document."}
 
+            # Privacy Filter: Intercept Secret Credentials in document text
+            if self._contains_secret_credentials(extracted_text):
+                logger.warning("Secret credentials detected in uploaded document. Intercepted by privacy filter.")
+                return {
+                    "success": False,
+                    "error": "Please remove sensitive credentials before uploading this file."
+                }
+
             # Split document text into lightweight chunks (~600 chars each)
             chunks = self._chunk_text(extracted_text, chunk_size=600, overlap=100)
 
@@ -347,8 +394,8 @@ class AIService:
             }
 
         except Exception as e:
-            logger.error(f"Error processing document upload: {e}")
-            return {"success": False, "error": f"Failed to process document: {str(e)}"}
+            logger.error(f"Error processing document upload: {type(e).__name__}")
+            return {"success": False, "error": "Failed to process document. Please ensure the file is a readable PDF, DOCX, or TXT document."}
 
     def _chunk_text(self, text: str, chunk_size: int = 600, overlap: int = 100) -> list:
         """
@@ -417,6 +464,15 @@ class AIService:
 
         if not snippet:
             return {"success": False, "error": "Document content or relevant section not found."}
+
+        # Privacy & Secret Credentials Filter
+        if self._contains_secret_credentials(snippet) or self._contains_secret_credentials(question):
+            logger.warning("Secret credentials detected in document analysis request. Intercepted by privacy filter.")
+            return {
+                "success": True,
+                "response": "Please remove sensitive credentials before uploading this file.",
+                "provider": "privacy_filter"
+            }
 
         is_mock_key = not self.api_key or self.api_key.lower() in ["mock", "your_api_key_here", "none"]
         if self.provider == "mock" or is_mock_key:
@@ -920,6 +976,15 @@ class AIService:
     def _generate_mock_image_analysis(self, prompt: str = "", language: str = "English") -> Dict[str, Any]:
         p_lower = prompt.lower().strip()
 
+        # Secret credentials check
+        secret_keywords = ["otp", "pin", "password", "cvv", "cvc", "passcode", "secret code"]
+        if any(kw in p_lower for kw in secret_keywords):
+            return {
+                "success": True,
+                "response": "Please remove sensitive credentials before uploading this file.",
+                "provider": "mock"
+            }
+
         # Unclear or blurry content check
         if "unclear" in p_lower or "blur" in p_lower or "blurry" in p_lower or "cannot read" in p_lower:
             return {
@@ -929,7 +994,7 @@ class AIService:
             }
 
         # Missing information check
-        missing_keywords = ["cvv", "pin", "password", "father name", "mother name", "passport", "tax id", "missing", "not present", "not in photo", "salary"]
+        missing_keywords = ["father name", "mother name", "passport", "tax id", "missing", "not present", "not in photo", "salary"]
         if any(kw in p_lower for kw in missing_keywords):
             return {
                 "success": True,
@@ -995,6 +1060,15 @@ class AIService:
         q_lower = q_text.lower().strip()
         snippet_lower = doc_text.lower().strip()
 
+        # Secret credentials check
+        secret_keywords = ["otp", "pin", "password", "cvv", "cvc", "passcode", "secret code"]
+        if any(kw in q_lower for kw in secret_keywords) or any(kw in snippet_lower for kw in secret_keywords):
+            return {
+                "success": True,
+                "response": "Please remove sensitive credentials before uploading this file.",
+                "provider": "mock"
+            }
+
         # Unclear content check
         if "unclear" in q_lower or "blur" in q_lower or "blurry" in q_lower or "cannot read" in q_lower or "unclear" in snippet_lower:
             return {
@@ -1004,7 +1078,7 @@ class AIService:
             }
 
         # Missing information check
-        missing_keywords = ["cvv", "pin", "password", "father name", "mother name", "passport", "tax id", "missing", "not present", "unknown info", "salary"]
+        missing_keywords = ["father name", "mother name", "passport", "tax id", "missing", "not present", "unknown info", "salary"]
         if any(kw in q_lower for kw in missing_keywords) and not any(kw in snippet_lower for kw in missing_keywords if len(kw) > 2):
             return {
                 "success": True,

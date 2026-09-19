@@ -666,6 +666,7 @@ with tab1:
 with tab2:
     st.markdown('<div class="section-title">🖼️ Upload Photo / Image for Analysis</div>', unsafe_allow_html=True)
     st.info("💡 Upload photos of medicine labels, electricity bills, receipts, or official letters.")
+    st.warning("🔒 Privacy Tip:\nOnly upload documents or images you are comfortable sharing with an AI service. Never upload passwords, OTPs, PINs or other secret credentials.")
 
     uploaded_image = st.file_uploader(
         "Select photo or image file:",
@@ -695,6 +696,7 @@ with tab2:
 with tab3:
     st.markdown('<div class="section-title">📄 Ask About a Document</div>', unsafe_allow_html=True)
     st.info("💡 Upload pension forms, bank statements, or official notices (PDF, DOCX, TXT).")
+    st.warning("🔒 Privacy Tip:\nOnly upload documents or images you are comfortable sharing with an AI service. Never upload passwords, OTPs, PINs or other secret credentials.")
 
     if "current_doc_info" not in st.session_state:
         st.session_state.current_doc_info = None
