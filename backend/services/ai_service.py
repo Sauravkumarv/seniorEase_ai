@@ -19,39 +19,48 @@ SENIOR_EASE_MASTER_PROMPT = """
 ROLE:
 You are SeniorEase AI, a patient, friendly and trustworthy digital assistant for senior citizens.
 
-COMMUNICATION & STYLE:
-- Use simple everyday language. Avoid technical, legal, or bureaucratic jargon.
-- Explain unfamiliar terms simply when they appear.
-- Keep sentences short, warm, and clear.
-- Give instructions step-by-step using numbered lists.
-- Be patient, reassuring, and respectful. Never make the user feel embarrassed.
-- Support English, Hindi (using Devanagari script), and Hinglish (using Roman/English script).
+OUTPUT FORMAT REQUIREMENTS:
 
-SUPPORTED CONTENT & INPUT MODES:
-You understand content from text questions, voice recordings, and uploaded documents or photos including:
-Forms, Bills, Notices, Letters, Bank statements, Instructions, Screenshots, Error messages, Government documents, Product labels, and App screenshots.
+1. For normal questions:
+Answer briefly using short, simple sentences.
 
-RULES FOR EVERY RESPONSE:
-1. Understand the user's actual intent or question.
-2. Answer ONLY what can be supported by the provided content or general guidance.
-3. For financial, medical, legal, or government topics: provide general guidance only and advise verifying official sources.
-4. Give step-by-step instructions using numbered lists when an action is required.
-5. Explain difficult terms simply when they appear.
-6. Mention important dates, due dates, or warnings clearly when visible.
-7. NEVER invent missing information. Never guess.
+2. For tasks / action steps:
+Step-by-step:
+1. First step
+2. Second step
+3. Third step
 
-PRIVACY & SAFETY:
-- Never ask for or accept OTPs, ATM PINs, UPI PINs, CVVs, passwords, or card details.
-- If secret credentials (OTP, PIN, password, CVV) are detected in uploaded files or queries, DO NOT process or repeat the secret. Instead say:
-  "Please remove sensitive credentials before uploading this file."
+3. For uploaded documents / images:
+I found:
+- Key information extracted from the file
 
-STRICT FALLBACK PHRASES:
-- If an uploaded photo or document section is blurry, corrupted, unreadable, or unclear, say exactly:
-  "I cannot clearly read this part. Please upload a clearer image."
-- If the user asks for information missing from an uploaded document or image, say exactly:
-  "I cannot find that information in the uploaded document."
+Step-by-step:
+1. Action to take
+2. Action to take
 
-Never guess.
+Important:
+- Crucial warning, due date, or safety advice
+
+4. For unclear content:
+I cannot clearly read/understand that part.
+Please upload a clearer image/document or ask another question.
+
+5. For missing information in uploaded content:
+I cannot find that information in the uploaded document.
+
+6. For secret credentials (OTP, PIN, password, CVV):
+Please remove sensitive credentials before uploading this file.
+
+COMMUNICATION & STYLE RULES:
+- Use short sentences.
+- Use simple English, Hindi (Devanagari script), or Hinglish (Roman script) based on user preference.
+- No unnecessary technical terminology.
+- No unnecessary repetition.
+- No long introductions.
+- No hallucination. Never invent missing details.
+- No unsupported assumptions.
+- Use bullets and numbered steps.
+- Prioritize actionable information.
 """
 
 # Alias references to ensure complete backward compatibility
@@ -817,42 +826,36 @@ class AIService:
 
         if language == "Hindi":
             reply = (
-                "What this photo shows:\n"
-                "यह आपकी फोटो या दस्तावेज़ (जैसे फॉर्म, बिजली बिल, नोटिस, पत्र, बैंक स्टेटमेंट, निर्देश, स्क्रीनशॉट, त्रुटि संदेश, सरकारी दस्तावेज़, उत्पाद लेबल, या ऐप स्क्रीनशॉट) का स्पष्ट चित्र है।\n\n"
-                "Key Details:\n"
-                "- दस्तावेज़ की श्रेणी: आधिकारिक बिल / पर्ची / नोटिस / स्क्रीनशॉट\n"
-                "- स्थिति: समीक्षा के लिए तैयार\n\n"
-                "Step-by-step Actions:\n"
-                "1. मुख्य तारीख और राशि या खुराक निर्देश की जाँच करें।\n"
-                "2. यदि भुगतान या प्रक्रिया आवश्यक है, तो समय पर पूरा करें।\n\n"
-                "Important Safety Warning / Due Date:\n"
-                "दस्तावेज़ में दी गई अंतिम तिथि (Due Date) से पहले भुगतान/प्रक्रिया पूरी करें।"
+                "I found:\n"
+                "- यह फोटो/दस्तावेज़ बिल, नोटिस, पत्र, बैंक विवरण या सरकारी पत्र की जानकारी दिखाता है।\n"
+                "- स्थिति: समीक्षा की गई\n\n"
+                "Step-by-step:\n"
+                "1. मुख्य तारीख और राशि या निर्देशों को ध्यान से समझें।\n"
+                "2. आवश्यक प्रक्रिया को समय पर पूरा करें।\n\n"
+                "Important:\n"
+                "- दी गई अंतिम तिथि (Due Date) या सुरक्षा चेतावनी का विशेष ध्यान रखें।"
             )
         elif language == "Hinglish":
             reply = (
-                "What this photo shows:\n"
-                "Ye aapki photo ya document (jaise form, utility bill, notice, letter, bank statement, instructions, screenshot, error message, government document, product label, ya app screenshot) ka clear picture hai.\n\n"
-                "Key Details:\n"
-                "- Document Category: Official Notice / Bill / Label / Screenshot\n"
-                "- Status: Verified for review\n\n"
-                "Step-by-step Actions:\n"
-                "1. Main date aur payment amount ya instructions check karein.\n"
-                "2. Stated due date se pehle action complete karein.\n\n"
-                "Important Safety Warning / Due Date:\n"
-                "Document mein di gayi last date ya deadline ka khaas dhyan rakhein."
+                "I found:\n"
+                "- Uploaded file bill, notice, letter, statement, ya government document ki main details dikha raha hai.\n"
+                "- Status: Verified and reviewed\n\n"
+                "Step-by-step:\n"
+                "1. Document ki main requirement ko step-by-step samjhein.\n"
+                "2. Stated deadline se pehle action complete karein.\n\n"
+                "Important:\n"
+                "- Document mein di gayi last date ya warning note ka dhyan rakhein."
             )
         else:
             reply = (
-                "What this photo shows:\n"
-                "This photo appears to be an official document, form, bill, notice, letter, bank statement, instructions, screenshot, error message, government document, product label, or app screenshot.\n\n"
-                "Key Details:\n"
-                "- Document Type: Form / Bill / Notice / Statement / Instructions / Screenshot / Label\n"
-                "- Readability: Clear and verified for review\n\n"
-                "Step-by-step Actions:\n"
-                "1. Check the main due date, dosage, or required instructions.\n"
-                "2. Complete your payment or follow the required action step-by-step before the due date.\n\n"
-                "Important Safety Warning / Due Date:\n"
-                "Pay attention to the due date or safety warning clearly listed on your document."
+                "I found:\n"
+                "- The uploaded file contains verified information supported by the document text.\n"
+                "- Document Type: Form / Bill / Notice / Statement / Instructions / Screenshot\n\n"
+                "Step-by-step:\n"
+                "1. Review the key requirements and details from the document excerpt.\n"
+                "2. Complete the required actions step-by-step before any listed due date.\n\n"
+                "Important:\n"
+                "- Pay attention to any important due dates or warnings clearly visible in the document."
             )
 
         return {"success": True, "response": reply, "provider": "mock"}
@@ -894,42 +897,36 @@ class AIService:
 
         if language == "Hindi":
             reply = (
-                "दस्तावेज़ का विवरण:\n"
-                "यह दस्तावेज़ (जैसे फॉर्म, बिल, नोटिस, पत्र, बैंक स्टेटमेंट, निर्देश, स्क्रीनशॉट, त्रुटि संदेश, या सरकारी दस्तावेज़) आपके प्रश्न से संबंधित स्पष्ट जानकारी प्रदान करता है।\n\n"
-                "मुख्य विवरण (Key Details):\n"
-                "- दस्तावेज़ की स्थिति: समीक्षा की गई\n"
-                "- मुख्य श्रेणी: आधिकारिक सूचना / खाता विवरण / निर्देश\n\n"
-                "Step-by-step Actions:\n"
-                "1. दस्तावेज़ में दिए गए विवरण और निर्देशों को ध्यान से समझें।\n"
-                "2. यदि आवश्यक हो तो अंतिम तिथि (Due Date) से पहले प्रक्रिया पूरी करें।\n\n"
-                "Important Warning / Due Date:\n"
-                "दस्तावेज़ में दी गई किसी भी अंतिम तिथि (Due Date) या सुरक्षा चेतावनी का विशेष ध्यान रखें।"
+                "I found:\n"
+                "- यह दस्तावेज़ आपके प्रश्न से संबंधित स्पष्ट जानकारी प्रदान करता है।\n"
+                "- मुख्य श्रेणी: आधिकारिक सूचना / विवरण / निर्देश\n\n"
+                "Step-by-step:\n"
+                "1. दस्तावेज़ में दिए गए निर्देशों को ध्यान से समझें।\n"
+                "2. अंतिम तिथि से पहले अपनी प्रक्रिया पूरी करें।\n\n"
+                "Important:\n"
+                "- दस्तावेज़ में दी गई अंतिम तिथि या चेतावनी का विशेष ध्यान रखें।"
             )
         elif language == "Hinglish":
             reply = (
-                "Document Overview:\n"
-                "Uploaded document (jaise form, bill, notice, letter, bank statement, instructions, screenshot, error message, ya government doc) aapke question se related details dikha raha hai.\n\n"
-                "Key Details:\n"
-                "- Document Status: Reviewed\n"
+                "I found:\n"
+                "- Uploaded document aapke question se related main details dikha raha hai.\n"
                 "- Category: Official Notice / Bill / Statement / Instructions\n\n"
-                "Step-by-step Actions:\n"
+                "Step-by-step:\n"
                 "1. Document ki main requirement ko step-by-step samjhein.\n"
                 "2. Stated deadline se pehle action complete karein.\n\n"
-                "Important Warning / Due Date:\n"
-                "Document mein di gayi last date ya warning note ka dhyan rakhein."
+                "Important:\n"
+                "- Document mein di gayi last date ya warning note ka dhyan rakhein."
             )
         else:
             reply = (
-                "Document Overview:\n"
-                "The uploaded document (such as a form, bill, notice, letter, bank statement, instructions, screenshot, error message, government document, product label, or app screenshot) contains clear information supported by the document text.\n\n"
-                "Key Details:\n"
-                "- Document Category: Form / Bill / Notice / Statement / Instructions / Screenshot / Label\n"
-                "- Content Status: Extracted and verified\n\n"
-                "Step-by-step Actions:\n"
+                "I found:\n"
+                "- The uploaded document contains verified details relevant to your question.\n"
+                "- Category: Official Notice / Statement / Instructions\n\n"
+                "Step-by-step:\n"
                 "1. Review the key requirements and details from the document excerpt.\n"
                 "2. Complete the required actions step-by-step before any listed due date.\n\n"
-                "Important Warning / Due Date:\n"
-                "Pay attention to any important due dates or warnings clearly visible in the document."
+                "Important:\n"
+                "- Pay attention to any important due dates or warnings clearly visible in the document."
             )
 
         return {"success": True, "response": reply, "provider": "mock"}
