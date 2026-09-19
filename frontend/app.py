@@ -231,6 +231,15 @@ if "input_box_value" not in st.session_state:
 if "active_audio" not in st.session_state:
     st.session_state.active_audio = {}
 
+if "voice_transcription" not in st.session_state:
+    st.session_state.voice_transcription = ""
+
+if "voice_status" not in st.session_state:
+    st.session_state.voice_status = "idle"  # 'idle', 'transcribed', 'submitted', 'unclear'
+
+if "voice_processed_audio_id" not in st.session_state:
+    st.session_state.voice_processed_audio_id = None
+
 # Helper function to request Audio TTS from backend (/api/voice/speak)
 def play_audio_response(msg_idx: int, text_content: str, selected_lang: str):
     try:
@@ -465,20 +474,98 @@ tab1, tab2, tab3, tab4 = st.tabs([
 
 # --- TAB 1: ASK & VOICE CHAT ---
 with tab1:
-    st.markdown('<div class="section-title">How can I help you today?</div>', unsafe_allow_html=True)
-    
-    # 🎙️ Audio Input / Voice Communication
-    st.markdown("**🎙️ Speak to SeniorEase:**")
-    try:
-        audio_val = st.audio_input("Record voice question", key="voice_recorder")
-        if audio_val:
-            st.info("🎙️ Voice recorded! Click 'Ask Voice Question' below to submit.")
-            if st.button("🎙️ Ask Voice Question", key="voice_submit_btn"):
-                with st.spinner("⏳ Converting your voice to text..."):
-                    submit_voice_transcription(audio_val.getvalue(), selected_language)
+    # 🎙️ VOICE MODE SECTION
+    st.markdown('<div class="section-title">🎙️ Voice Mode</div>', unsafe_allow_html=True)
+    st.info("💡 Speak your question aloud. We will transcribe your voice so you can review before sending.")
+
+    # Controls: [Start Speaking] and Selected Language display
+    rec_col, lang_col = st.columns([2, 1])
+    with rec_col:
+        recorded_audio = st.audio_input("Start Speaking (Record Voice)", key="voice_mode_recorder")
+    with lang_col:
+        st.markdown("**Language:**")
+        st.write(f"🗣️ **{selected_language}**")
+
+    # Audio Capture & Single-time Transcription Check
+    if recorded_audio is not None:
+        audio_bytes = recorded_audio.getvalue()
+        audio_id = hash(audio_bytes)
+
+        if st.session_state.voice_processed_audio_id != audio_id:
+            with st.spinner("⏳ Converting your voice to text..."):
+                try:
+                    files = {'file': ('recording.wav', audio_bytes, 'audio/wav')}
+                    data = {'language': selected_language}
+                    response = requests.post(VOICE_TRANSCRIBE_URL, files=files, data=data, timeout=15)
+                    if response.status_code == 200:
+                        res_data = response.json()
+                        if res_data.get("success") and res_data.get("text", "").strip():
+                            st.session_state.voice_transcription = res_data.get("text").strip()
+                            st.session_state.voice_status = "transcribed"
+                        else:
+                            st.session_state.voice_status = "unclear"
+                            st.session_state.voice_transcription = ""
+                    else:
+                        st.session_state.voice_status = "unclear"
+                        st.session_state.voice_transcription = ""
+                except Exception:
+                    st.session_state.voice_status = "unclear"
+                    st.session_state.voice_transcription = ""
+
+                st.session_state.voice_processed_audio_id = audio_id
+                st.rerun()
+
+    # Did you mean? or Unclear Voice Warning
+    if st.session_state.voice_status == "unclear":
+        st.warning("⚠️ I couldn't hear you clearly. Please tap 'Start Speaking' and try repeating your question.")
+
+    elif st.session_state.voice_status in ["transcribed", "submitted"] and st.session_state.voice_transcription:
+        st.markdown(
+            f"""
+            <div style="background-color: #F0FDF4; border: 2px solid #22C55E; border-radius: 14px; padding: 18px 22px; margin-top: 14px; margin-bottom: 14px;">
+                <div style="font-size: 20px; font-weight: 700; color: #15803D;">Did you mean?</div>
+                <div style="font-size: 22px; color: #0F172A; font-weight: 600; margin-top: 6px;">"{st.session_state.voice_transcription}"</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        # [Ask SeniorEase] Action Button
+        if st.session_state.voice_status == "transcribed":
+            if st.button("Ask SeniorEase", key="voice_mode_ask_btn"):
+                submit_question(st.session_state.voice_transcription, selected_language)
+                st.session_state.voice_status = "submitted"
+                st.rerun()
+
+        # Display AI Response & [🔊 Listen to Answer] button
+        if st.session_state.voice_status == "submitted" and st.session_state.conversation_history:
+            last_msg = st.session_state.conversation_history[-1]
+            if last_msg["role"] == "assistant":
+                st.markdown(
+                    f"""
+                    <div class="ai-card" style="margin-top: 14px;">
+                        <div class="ai-card-title">👵 SeniorEase AI Response:</div>
+                        <div class="card-content">{last_msg['content']}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True
+                )
+                
+                last_idx = len(st.session_state.conversation_history) - 1
+                if st.button("🔊 Listen to Answer", key="vm_listen_btn"):
+                    play_audio_response(last_idx, last_msg["content"], selected_language)
+
+                if last_idx in st.session_state.active_audio:
+                    st.audio(st.session_state.active_audio[last_idx], format="audio/mp3")
+
+                if st.button("🎙️ Speak Another Question", key="vm_reset_btn"):
+                    st.session_state.voice_status = "idle"
+                    st.session_state.voice_transcription = ""
+                    st.session_state.voice_processed_audio_id = None
                     st.rerun()
-    except Exception:
-        pass
+
+    st.divider()
+    st.markdown('<div class="section-title">💬 Type or Tap a Question</div>', unsafe_allow_html=True)
 
     # Quick Help Category Buttons
     st.markdown('**Tap a quick help topic below:**')
