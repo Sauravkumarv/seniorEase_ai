@@ -694,51 +694,81 @@ with tab2:
 # --- TAB 3: ASK ABOUT A DOCUMENT ---
 with tab3:
     st.markdown('<div class="section-title">📄 Ask About a Document</div>', unsafe_allow_html=True)
-    st.info("💡 Upload pension forms, bank statements, or official notices (PDF, DOCX, TXT). We retrieve only relevant sections to keep answers fast and clear.")
+    st.info("💡 Upload pension forms, bank statements, or official notices (PDF, DOCX, TXT).")
+
+    if "current_doc_info" not in st.session_state:
+        st.session_state.current_doc_info = None
 
     uploaded_doc = st.file_uploader(
-        "Select PDF, DOCX or Text document file:",
+        "Upload document:",
         type=["pdf", "docx", "txt"],
         key="doc_uploader"
     )
 
-    doc_question = st.text_area(
-        label="What question do you have about this document?",
-        placeholder="e.g., What is the last date to submit this form? Or what is the total amount due?",
-        height=100,
-        key="doc_question_area"
-    )
-
     if uploaded_doc is not None:
         doc_bytes = uploaded_doc.getvalue()
-        doc_id_key = f"uploaded_doc_id_{hash(doc_bytes)}"
+        audio_id = hash(doc_bytes)
 
-        if doc_id_key not in st.session_state:
-            with st.spinner("⏳ Uploading document & creating lightweight index..."):
+        # Upload document to backend if not already uploaded in session_state
+        if not st.session_state.current_doc_info or st.session_state.current_doc_info.get("hash") != audio_id:
+            with st.spinner("⏳ Extracting text and indexing document..."):
                 try:
                     files = {'file': (uploaded_doc.name, doc_bytes, uploaded_doc.type or 'application/octet-stream')}
                     res = requests.post(DOC_UPLOAD_URL, files=files, timeout=15)
                     if res.status_code == 200 and res.json().get("success"):
-                        doc_info = res.json()
-                        st.session_state[doc_id_key] = doc_info
+                        info = res.json()
+                        info["hash"] = audio_id
+                        st.session_state.current_doc_info = info
                     else:
-                        st.session_state[doc_id_key] = {"error": "Could not upload document."}
+                        st.session_state.current_doc_info = {"error": "Could not extract text from document."}
                 except Exception as e:
-                    st.session_state[doc_id_key] = {"error": str(e)}
+                    st.session_state.current_doc_info = {"error": str(e)}
 
-        doc_info = st.session_state.get(doc_id_key, {})
+        doc_info = st.session_state.current_doc_info
+
         if doc_info and "document_id" in doc_info:
-            st.success(f"📄 Loaded document: {doc_info['filename']} ({doc_info['page_count']} pages, {doc_info['text_length']:,} characters)")
+            # Metadata Display Box
+            st.markdown(
+                f"""
+                <div style="background-color: #F0FDF4; border: 2px solid #22C55E; border-radius: 14px; padding: 18px 22px; margin-top: 14px; margin-bottom: 20px;">
+                    <div style="font-size: 22px; font-weight: 800; color: #15803D; margin-bottom: 8px;">✓ Document uploaded</div>
+                    <div style="font-size: 20px; color: #0F172A; margin-bottom: 4px;"><b>File name:</b> {doc_info['filename']}</div>
+                    <div style="font-size: 20px; color: #0F172A; margin-bottom: 4px;"><b>Pages:</b> {doc_info['page_count']}</div>
+                    <div style="font-size: 20px; color: #0F172A;"><b>Extracted text available:</b> Yes</div>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
 
-            if st.button("Ask About Document", key="doc_button"):
-                with st.spinner("⏳ Finding relevant section & answering your question..."):
-                    submit_doc_analysis(
-                        doc_id=doc_info["document_id"],
-                        doc_name=doc_info["filename"],
-                        user_question=doc_question,
-                        selected_lang=selected_language
-                    )
+            # Question Input Area
+            doc_question = st.text_area(
+                label="What would you like to know?",
+                placeholder="e.g., How much money was spent this month? Or what is the due date?",
+                height=130,
+                key="doc_question_area"
+            )
+
+            btn_col1, btn_col2 = st.columns([2, 1])
+
+            with btn_col1:
+                if st.button("Ask About Document", key="doc_button"):
+                    if doc_question and doc_question.strip():
+                        with st.spinner("⏳ SeniorEase AI is finding relevant details in your document..."):
+                            submit_doc_analysis(
+                                doc_id=doc_info["document_id"],
+                                doc_name=doc_info["filename"],
+                                user_question=doc_question,
+                                selected_lang=selected_language
+                            )
+                            st.rerun()
+                    else:
+                        st.warning("Please type a question about your document.")
+
+            with btn_col2:
+                if st.button("Clear Document", key="clear_doc_btn", use_container_width=True):
+                    st.session_state.current_doc_info = None
                     st.rerun()
+
         elif doc_info and "error" in doc_info:
             st.error(f"Document processing issue: {doc_info['error']}")
 
