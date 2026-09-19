@@ -579,8 +579,8 @@ with tab3:
     st.info("💡 Upload pension forms, bank statements, or official PDF notices.")
 
     uploaded_doc = st.file_uploader(
-        "Select PDF or Text document file:",
-        type=["pdf", "txt"],
+        "Select PDF, DOCX or Text document file:",
+        type=["pdf", "docx", "txt"],
         key="doc_uploader"
     )
 
@@ -600,12 +600,16 @@ with tab3:
                     doc_bytes = uploaded_doc.getvalue()
                     doc_text = ""
 
-                    if uploaded_doc.name.endswith(".pdf"):
+                    if uploaded_doc.name.lower().endswith(".pdf"):
                         pdf_reader = pypdf.PdfReader(io.BytesIO(doc_bytes))
                         for page in pdf_reader.pages:
                             text = page.extract_text()
                             if text:
                                 doc_text += text + "\n"
+                    elif uploaded_doc.name.lower().endswith(".docx"):
+                        import docx
+                        doc_obj = docx.Document(io.BytesIO(doc_bytes))
+                        doc_text = "\n".join([p.text for p in doc_obj.paragraphs if p.text])
                     else:
                         doc_text = doc_bytes.decode('utf-8', errors='ignore')
 

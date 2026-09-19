@@ -220,6 +220,21 @@ class AIService:
 
         return self._generate_mock_image_analysis(prompt, language)
 
+    def _extract_ocr_text(self, image_b64: str) -> str:
+        """
+        Optional OCR fallback using Pillow and pytesseract.
+        Returns extracted text or empty string if OCR is unavailable.
+        """
+        try:
+            from PIL import Image
+            import pytesseract
+            img_bytes = base64.b64decode(image_b64)
+            img = Image.open(io.BytesIO(img_bytes))
+            text = pytesseract.image_to_string(img)
+            return text.strip()
+        except Exception:
+            return ""
+
     def analyze_document(self, document_text: str, question: str = "", language: str = "English") -> Dict[str, Any]:
         """
         Analyzes extracted document text (PDF or TXT) and answers senior user questions.
