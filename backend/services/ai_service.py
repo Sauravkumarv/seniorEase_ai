@@ -99,30 +99,81 @@ Important Warnings / Deadlines:
 # System Prompt for Image & Photo Analysis
 IMAGE_SYSTEM_PROMPT = """
 ROLE:
-You are SeniorEase AI, analyzing an image/photo (such as a medicine bottle label, utility bill, official notice, receipt, or sign) for a senior citizen.
+You are SeniorEase AI, analyzing an uploaded image/photo for a senior citizen.
 
-RULES:
-1. Identify what the image is (e.g. "This is a prescription medicine bottle label" or "This is an electricity bill").
-2. Summarize key details clearly (e.g. Medicine name, Dosage instructions, Due date, Total amount due).
-3. Use simple everyday language. Avoid jargon.
-4. List important action steps using a numbered list.
-5. Highlight important safety warnings or due dates.
-6. Support English, Hindi, and Hinglish.
+SUPPORTED CONTENT TYPES:
+Uploaded content may contain:
+- Forms
+- Bills
+- Notices
+- Letters
+- Bank statements
+- Instructions
+- Screenshots
+- Error messages
+- Government documents
+- Product labels
+- App screenshots
 
-RESPONSE FORMAT:
-What this photo shows:
-[1-2 clear sentences explaining what the image is]
+RULES FOR EVERY UPLOADED IMAGE:
+1. Understand the content carefully.
+2. Identify the user's actual question.
+3. Answer ONLY what can be supported by the uploaded content.
+4. Use simple, senior-friendly language. Avoid technical or legal jargon.
+5. Give step-by-step instructions using numbered lists when an action is required.
+6. Explain difficult terms simply when they appear.
+7. Mention important dates, due dates, or warnings when clearly visible.
+8. NEVER invent missing information. Never guess.
 
-Key Details:
-- Detail one
-- Detail two
+IF UNCLEAR CONTENT:
+If the content or image is blurry, corrupted, unreadable, or unclear, say exactly:
+"I cannot clearly read this part. Please upload a clearer image."
 
-Step-by-step Actions:
-1. Action step one
-2. Action step two
+IF MISSING INFORMATION:
+If the user asks for information that cannot be found or is missing in the uploaded image, say exactly:
+"I cannot find that information in the uploaded document."
 
-Important Safety Warning / Due Date:
-[Any important warning or due date from the image]
+Never guess.
+"""
+
+# System Prompt for Document Analysis (PDF, DOCX, TXT)
+DOCUMENT_SYSTEM_PROMPT = """
+ROLE:
+You are SeniorEase AI, analyzing an uploaded document for a senior citizen.
+
+SUPPORTED CONTENT TYPES:
+Uploaded content may contain:
+- Forms
+- Bills
+- Notices
+- Letters
+- Bank statements
+- Instructions
+- Screenshots
+- Error messages
+- Government documents
+- Product labels
+- App screenshots
+
+RULES FOR EVERY UPLOADED DOCUMENT:
+1. Understand the content carefully.
+2. Identify the user's actual question.
+3. Answer ONLY what can be supported by the uploaded content.
+4. Use simple, senior-friendly language. Avoid technical or legal jargon.
+5. Give step-by-step instructions using numbered lists when an action is required.
+6. Explain difficult terms simply when they appear.
+7. Mention important dates, due dates, or warnings when clearly visible.
+8. NEVER invent missing information. Never guess.
+
+IF UNCLEAR CONTENT:
+If the document content is corrupted, unreadable, or unclear, say exactly:
+"I cannot clearly read this part. Please upload a clearer image."
+
+IF MISSING INFORMATION:
+If the user asks for information that cannot be found or is missing in the uploaded document, say exactly:
+"I cannot find that information in the uploaded document."
+
+Never guess.
 """
 
 class AIService:
@@ -138,7 +189,7 @@ class AIService:
 
         logger.info(f"Initialized AIService with provider: '{self.provider}' and model: '{self.model}'")
 
-    def generate_response(self, user_message: str, category: str = "general", language: str = "English") -> Dict[str, Any]:
+    def generate_response(self, user_message: str, category: str = "general", language: str = "English", system_prompt: str = None) -> Dict[str, Any]:
         """
         Generates a senior-friendly response adhering strictly to SeniorEase AI guidelines.
         """
@@ -164,10 +215,10 @@ class AIService:
             return self._generate_mock_response(cleaned_message, category, language)
 
         if self.provider in ["gemini", "google"]:
-            return self._call_gemini_api(cleaned_message, language)
+            return self._call_gemini_api(cleaned_message, language, system_prompt=system_prompt)
 
         if self.provider == "openai":
-            return self._call_openai_api(cleaned_message, language)
+            return self._call_openai_api(cleaned_message, language, system_prompt=system_prompt)
 
         logger.warning(f"Unrecognized provider '{self.provider}'. Falling back to mock service.")
         return self._generate_mock_response(cleaned_message, category, language)
@@ -348,6 +399,7 @@ class AIService:
     def analyze_document(self, document_text: str = "", question: str = "", language: str = "English", document_id: str = "") -> Dict[str, Any]:
         """
         Analyzes extracted document text using lightweight chunk retrieval to strictly limit token consumption.
+        Supports Forms, Bills, Notices, Letters, Bank Statements, Instructions, Screenshots, Error messages, Government docs, Product labels.
         """
         snippet = ""
         if document_id and document_id in DOCUMENT_STORE:
@@ -366,12 +418,16 @@ class AIService:
         if not snippet:
             return {"success": False, "error": "Document content or relevant section not found."}
 
+        is_mock_key = not self.api_key or self.api_key.lower() in ["mock", "your_api_key_here", "none"]
+        if self.provider == "mock" or is_mock_key:
+            return self._generate_mock_document_analysis(snippet=snippet, question=question, language=language)
+
         doc_prompt = (
             f"RELEVANT DOCUMENT EXCERPT:\n{snippet}\n\n"
-            f"User Question: {question if question.strip() else 'Please summarize this document section clearly for me.'}"
+            f"User Question: {question if question.strip() else 'Please understand this document content, identify key details, explain any difficult terms, and answer clearly step-by-step.'}"
         )
 
-        return self.generate_response(user_message=doc_prompt, language=language)
+        return self.generate_response(user_message=doc_prompt, language=language, system_prompt=DOCUMENT_SYSTEM_PROMPT)
 
     def generate_tts(self, text: str, language: str = "English") -> Dict[str, Any]:
         """
@@ -598,7 +654,7 @@ class AIService:
                 )
         return ""
 
-    def _call_gemini_api(self, user_message: str, language: str = "English") -> Dict[str, Any]:
+    def _call_gemini_api(self, user_message: str, language: str = "English", system_prompt: str = None) -> Dict[str, Any]:
         try:
             import requests
 
@@ -610,7 +666,8 @@ class AIService:
             else:
                 lang_directive += " Respond in simple English."
 
-            full_system_prompt = SENIOR_EASE_SYSTEM_PROMPT + lang_directive
+            base_prompt = system_prompt or SENIOR_EASE_SYSTEM_PROMPT
+            full_system_prompt = base_prompt + lang_directive
             model_name = self.model if "gemini" in self.model else "gemini-1.5-flash"
             gemini_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
 
@@ -645,13 +702,13 @@ class AIService:
                         }
 
             logger.error(f"Gemini API error {res.status_code}: {res.text}")
-            mock_res = self._generate_mock_response(user_message, language=language)
+            mock_res = self._fallback_mock_response(user_message, language=language, system_prompt=system_prompt)
             mock_res["warning"] = f"Gemini API response issue (Code {res.status_code}). Showing demonstration response."
             return mock_res
 
         except Exception as e:
             logger.error(f"Gemini API call exception: {e}")
-            mock_res = self._generate_mock_response(user_message, language=language)
+            mock_res = self._fallback_mock_response(user_message, language=language, system_prompt=system_prompt)
             mock_res["warning"] = f"Gemini API connection error ({str(e)}). Showing demonstration response."
             return mock_res
 
@@ -776,7 +833,7 @@ class AIService:
             logger.error(f"Gemini Vision API exception: {e}")
             return self._generate_mock_image_analysis(prompt, language)
 
-    def _call_openai_api(self, user_message: str, language: str = "English") -> Dict[str, Any]:
+    def _call_openai_api(self, user_message: str, language: str = "English", system_prompt: str = None) -> Dict[str, Any]:
         try:
             from openai import OpenAI
             client = OpenAI(api_key=self.api_key)
@@ -789,7 +846,8 @@ class AIService:
             else:
                 lang_directive += " Respond in simple English."
 
-            full_system_prompt = SENIOR_EASE_SYSTEM_PROMPT + lang_directive
+            base_prompt = system_prompt or SENIOR_EASE_SYSTEM_PROMPT
+            full_system_prompt = base_prompt + lang_directive
 
             completion = client.chat.completions.create(
                 model=self.model,
@@ -810,9 +868,16 @@ class AIService:
 
         except Exception as e:
             logger.error(f"OpenAI API call error: {e}")
-            mock_res = self._generate_mock_response(user_message, language=language)
+            mock_res = self._fallback_mock_response(user_message, language=language, system_prompt=system_prompt)
             mock_res["warning"] = f"API connection issue ({str(e)}). Showing offline demonstration response."
             return mock_res
+
+    def _fallback_mock_response(self, user_message: str, category: str = "general", language: str = "English", system_prompt: str = None) -> Dict[str, Any]:
+        if system_prompt == DOCUMENT_SYSTEM_PROMPT:
+            return self._generate_mock_document_analysis(snippet=user_message, question=user_message, language=language)
+        if system_prompt == IMAGE_SYSTEM_PROMPT:
+            return self._generate_mock_image_analysis(prompt=user_message, language=language)
+        return self._generate_mock_response(user_message, category, language)
 
     def _call_openai_explain(self, text: str, language: str = "English") -> Dict[str, Any]:
         try:
@@ -853,44 +918,138 @@ class AIService:
             return mock_res
 
     def _generate_mock_image_analysis(self, prompt: str = "", language: str = "English") -> Dict[str, Any]:
+        p_lower = prompt.lower().strip()
+
+        # Unclear or blurry content check
+        if "unclear" in p_lower or "blur" in p_lower or "blurry" in p_lower or "cannot read" in p_lower:
+            return {
+                "success": True,
+                "response": "I cannot clearly read this part. Please upload a clearer image.",
+                "provider": "mock"
+            }
+
+        # Missing information check
+        missing_keywords = ["cvv", "pin", "password", "father name", "mother name", "passport", "tax id", "missing", "not present", "not in photo", "salary"]
+        if any(kw in p_lower for kw in missing_keywords):
+            return {
+                "success": True,
+                "response": "I cannot find that information in the uploaded document.",
+                "provider": "mock"
+            }
+
         if language == "Hindi":
             reply = (
                 "What this photo shows:\n"
-                "यह आपकी फोटो या दस्तावेज़ (जैसे बिजली बिल या दवा की पर्ची) का स्पष्ट चित्र है।\n\n"
+                "यह आपकी फोटो या दस्तावेज़ (जैसे फॉर्म, बिजली बिल, नोटिस, पत्र, बैंक स्टेटमेंट, निर्देश, स्क्रीनशॉट, त्रुटि संदेश, सरकारी दस्तावेज़, उत्पाद लेबल, या ऐप स्क्रीनशॉट) का स्पष्ट चित्र है।\n\n"
                 "Key Details:\n"
-                "- दस्तावेज़ की मुख्य श्रेणी: आधिकारिक बिल / पर्ची\n"
+                "- दस्तावेज़ की श्रेणी: आधिकारिक बिल / पर्ची / नोटिस / स्क्रीनशॉट\n"
                 "- स्थिति: समीक्षा के लिए तैयार\n\n"
                 "Step-by-step Actions:\n"
                 "1. मुख्य तारीख और राशि या खुराक निर्देश की जाँच करें।\n"
-                "2. यदि भुगतान या दवा लेना है, तो समय पर पूरा करें।\n\n"
+                "2. यदि भुगतान या प्रक्रिया आवश्यक है, तो समय पर पूरा करें।\n\n"
                 "Important Safety Warning / Due Date:\n"
                 "दस्तावेज़ में दी गई अंतिम तिथि (Due Date) से पहले भुगतान/प्रक्रिया पूरी करें।"
             )
         elif language == "Hinglish":
             reply = (
                 "What this photo shows:\n"
-                "Ye aapki photo ya document (jaise utility bill ya prescription) ka clear picture hai.\n\n"
+                "Ye aapki photo ya document (jaise form, utility bill, notice, letter, bank statement, instructions, screenshot, error message, government document, product label, ya app screenshot) ka clear picture hai.\n\n"
                 "Key Details:\n"
-                "- Document Category: Official Notice / Bill\n"
+                "- Document Category: Official Notice / Bill / Label / Screenshot\n"
                 "- Status: Verified for review\n\n"
                 "Step-by-step Actions:\n"
-                "1. Main date aur payment amount ya dosage instruction check karein.\n"
-                "2. Due date se pehle action complete karein.\n\n"
+                "1. Main date aur payment amount ya instructions check karein.\n"
+                "2. Stated due date se pehle action complete karein.\n\n"
                 "Important Safety Warning / Due Date:\n"
                 "Document mein di gayi last date ya deadline ka khaas dhyan rakhein."
             )
         else:
             reply = (
                 "What this photo shows:\n"
-                "This photo appears to be an official document, utility bill, or prescription label.\n\n"
+                "This photo appears to be an official document, form, bill, notice, letter, bank statement, instructions, screenshot, error message, government document, product label, or app screenshot.\n\n"
                 "Key Details:\n"
-                "- Document Type: Official Bill / Prescription / Notice\n"
+                "- Document Type: Form / Bill / Notice / Statement / Instructions / Screenshot / Label\n"
                 "- Readability: Clear and verified for review\n\n"
                 "Step-by-step Actions:\n"
-                "1. Check the main due date or dosage instructions.\n"
-                "2. Complete your payment or follow the required action before the due date.\n\n"
+                "1. Check the main due date, dosage, or required instructions.\n"
+                "2. Complete your payment or follow the required action step-by-step before the due date.\n\n"
                 "Important Safety Warning / Due Date:\n"
-                "Pay attention to the due date or safety warning listed on your document."
+                "Pay attention to the due date or safety warning clearly listed on your document."
+            )
+
+        return {
+            "success": True,
+            "response": reply,
+            "provider": "mock"
+        }
+
+    def _generate_mock_document_analysis(self, snippet: str = "", question: str = "", language: str = "English") -> Dict[str, Any]:
+        doc_text = snippet
+        q_text = question
+
+        if "RELEVANT DOCUMENT EXCERPT:" in snippet and "User Question:" in snippet:
+            parts = snippet.split("User Question:")
+            doc_text = parts[0].replace("RELEVANT DOCUMENT EXCERPT:", "").strip()
+            q_text = parts[1].strip() if len(parts) > 1 else question
+
+        q_lower = q_text.lower().strip()
+        snippet_lower = doc_text.lower().strip()
+
+        # Unclear content check
+        if "unclear" in q_lower or "blur" in q_lower or "blurry" in q_lower or "cannot read" in q_lower or "unclear" in snippet_lower:
+            return {
+                "success": True,
+                "response": "I cannot clearly read this part. Please upload a clearer image.",
+                "provider": "mock"
+            }
+
+        # Missing information check
+        missing_keywords = ["cvv", "pin", "password", "father name", "mother name", "passport", "tax id", "missing", "not present", "unknown info", "salary"]
+        if any(kw in q_lower for kw in missing_keywords) and not any(kw in snippet_lower for kw in missing_keywords if len(kw) > 2):
+            return {
+                "success": True,
+                "response": "I cannot find that information in the uploaded document.",
+                "provider": "mock"
+            }
+
+        if language == "Hindi":
+            reply = (
+                "दस्तावेज़ का विवरण:\n"
+                "यह दस्तावेज़ (जैसे फॉर्म, बिल, नोटिस, पत्र, बैंक स्टेटमेंट, निर्देश, स्क्रीनशॉट, त्रुटि संदेश, या सरकारी दस्तावेज़) आपके प्रश्न से संबंधित स्पष्ट जानकारी प्रदान करता है।\n\n"
+                "मुख्य विवरण (Key Details):\n"
+                "- दस्तावेज़ की स्थिति: समीक्षा की गई\n"
+                "- मुख्य श्रेणी: आधिकारिक सूचना / खाता विवरण / निर्देश\n\n"
+                "Step-by-step Actions:\n"
+                "1. दस्तावेज़ में दिए गए विवरण और निर्देशों को ध्यान से समझें।\n"
+                "2. यदि आवश्यक हो तो अंतिम तिथि (Due Date) से पहले प्रक्रिया पूरी करें।\n\n"
+                "Important Warning / Due Date:\n"
+                "दस्तावेज़ में दी गई किसी भी अंतिम तिथि (Due Date) या सुरक्षा चेतावनी का विशेष ध्यान रखें।"
+            )
+        elif language == "Hinglish":
+            reply = (
+                "Document Overview:\n"
+                "Uploaded document (jaise form, bill, notice, letter, bank statement, instructions, screenshot, error message, ya government doc) aapke question se related details dikha raha hai.\n\n"
+                "Key Details:\n"
+                "- Document Status: Reviewed\n"
+                "- Category: Official Notice / Bill / Statement / Instructions\n\n"
+                "Step-by-step Actions:\n"
+                "1. Document ki main requirement ko step-by-step samjhein.\n"
+                "2. Stated deadline se pehle action complete karein.\n\n"
+                "Important Warning / Due Date:\n"
+                "Document mein di gayi last date ya warning note ka dhyan rakhein."
+            )
+        else:
+            reply = (
+                "Document Overview:\n"
+                "The uploaded document (such as a form, bill, notice, letter, bank statement, instructions, screenshot, error message, government document, product label, or app screenshot) contains clear information supported by the document text.\n\n"
+                "Key Details:\n"
+                "- Document Category: Form / Bill / Notice / Statement / Instructions / Screenshot / Label\n"
+                "- Content Status: Extracted and verified\n\n"
+                "Step-by-step Actions:\n"
+                "1. Review the key requirements and details from the document excerpt.\n"
+                "2. Complete the required actions step-by-step before any listed due date.\n\n"
+                "Important Warning / Due Date:\n"
+                "Pay attention to any important due dates or warnings clearly visible in the document."
             )
 
         return {
