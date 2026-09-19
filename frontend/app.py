@@ -11,6 +11,7 @@ IMAGE_URL = "http://localhost:5000/api/analyze-image"
 DOC_URL = "http://localhost:5000/api/analyze-doc"
 TTS_URL = "http://localhost:5000/api/tts"
 VOICE_TRANSCRIBE_URL = "http://localhost:5000/api/voice/transcribe"
+VOICE_SPEAK_URL = "http://localhost:5000/api/voice/speak"
 
 # Streamlit Page Configuration - Clean, Centered, Professional
 st.set_page_config(
@@ -230,11 +231,11 @@ if "input_box_value" not in st.session_state:
 if "active_audio" not in st.session_state:
     st.session_state.active_audio = {}
 
-# Helper function to request Audio TTS from backend
+# Helper function to request Audio TTS from backend (/api/voice/speak)
 def play_audio_response(msg_idx: int, text_content: str, selected_lang: str):
     try:
         payload = {"text": text_content, "language": selected_lang}
-        response = requests.post(TTS_URL, json=payload, timeout=10)
+        response = requests.post(VOICE_SPEAK_URL, json=payload, timeout=12)
         if response.status_code == 200:
             data = response.json()
             if data.get("success"):
@@ -243,7 +244,7 @@ def play_audio_response(msg_idx: int, text_content: str, selected_lang: str):
             else:
                 st.error("Audio synthesis failed.")
         else:
-            st.error("Unable to generate audio.")
+            st.error("Unable to generate spoken audio.")
     except Exception as e:
         st.error(f"TTS connection error: {e}")
 

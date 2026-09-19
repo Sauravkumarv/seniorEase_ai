@@ -275,8 +275,20 @@ def tts():
     except Exception as e:
         return jsonify({
             "success": False,
-            "message": f"An unexpected error occurred: {str(e)}"
+            "message": "Unable to generate spoken voice output."
         }), 500
+
+@chat_bp.route('/voice/speak', methods=['POST'])
+def voice_speak():
+    """
+    Voice Speak Endpoint generating spoken audio for AI responses.
+    Expects JSON payload:
+    {
+        "text": "AI response text",
+        "language": "English | Hindi | Hinglish"
+    }
+    """
+    return tts()
 
 @chat_bp.route('/voice/transcribe', methods=['POST'])
 def voice_transcribe():

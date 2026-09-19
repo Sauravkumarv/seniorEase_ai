@@ -255,6 +255,7 @@ class AIService:
     def generate_tts(self, text: str, language: str = "English") -> Dict[str, Any]:
         """
         Generates base64 MP3 audio from text using gTTS for spoken voice playback.
+        Pre-processes text to remove markdown, code formatting, and limit speech length.
         """
         if not text or not text.strip():
             return {"success": False, "error": "Text is required for TTS."}
@@ -262,8 +263,22 @@ class AIService:
         try:
             from gtts import gTTS
 
-            # Clean markdown symbols for natural speech synthesis
-            clean_speech = re.sub(r'[\*\#\_\`]', '', text)
+            # 1. Clean code formatting, markdown, bullet symbols, and URLs
+            clean_speech = text
+            clean_speech = re.sub(r'```[\s\S]*?```', '', clean_speech)
+            clean_speech = re.sub(r'`[^`]*`', '', clean_speech)
+            clean_speech = re.sub(r'[\*\#\_\~]', '', clean_speech)
+            clean_speech = re.sub(r'https?://\S+', '', clean_speech)
+            clean_speech = re.sub(r'\n+', ' ', clean_speech)
+            clean_speech = clean_speech.strip()
+
+            # 2. Limit spoken response length to ~450 chars for natural, concise speech
+            if len(clean_speech) > 450:
+                cutoff = clean_speech[:450].rfind('.')
+                if cutoff > 200:
+                    clean_speech = clean_speech[:cutoff + 1]
+                else:
+                    clean_speech = clean_speech[:450] + "."
 
             lang_code = 'en'
             if language == "Hindi":
@@ -271,7 +286,7 @@ class AIService:
             elif language == "Hinglish":
                 lang_code = 'hi'
 
-            tts = gTTS(text=clean_speech[:800], lang=lang_code, slow=False)
+            tts = gTTS(text=clean_speech, lang=lang_code, slow=False)
             fp = io.BytesIO()
             tts.write_to_fp(fp)
             fp.seek(0)
@@ -280,14 +295,15 @@ class AIService:
             return {
                 "success": True,
                 "audio_b64": audio_b64,
-                "mime_type": "audio/mp3"
+                "mime_type": "audio/mp3",
+                "clean_text": clean_speech
             }
 
         except Exception as e:
             logger.error(f"TTS generation error: {e}")
             return {
                 "success": False,
-                "error": f"Audio synthesis unavailable: {str(e)}"
+                "error": "Audio synthesis unavailable."
             }
 
     def transcribe_audio(self, audio_bytes: bytes, filename: str = "audio.wav", language: str = "English") -> Dict[str, Any]:
