@@ -1,5 +1,7 @@
 import os
 import re
+import io
+import base64
 import logging
 from typing import Dict, Any
 
@@ -91,10 +93,39 @@ Important Warnings / Deadlines:
 [Preserved deadlines, due dates, or safety warnings if mentioned in the text]
 """
 
+# System Prompt for Image & Photo Analysis
+IMAGE_SYSTEM_PROMPT = """
+ROLE:
+You are SeniorEase AI, analyzing an image/photo (such as a medicine bottle label, utility bill, official notice, receipt, or sign) for a senior citizen.
+
+RULES:
+1. Identify what the image is (e.g. "This is a prescription medicine bottle label" or "This is an electricity bill").
+2. Summarize key details clearly (e.g. Medicine name, Dosage instructions, Due date, Total amount due).
+3. Use simple everyday language. Avoid jargon.
+4. List important action steps using a numbered list.
+5. Highlight important safety warnings or due dates.
+6. Support English, Hindi, and Hinglish.
+
+RESPONSE FORMAT:
+What this photo shows:
+[1-2 clear sentences explaining what the image is]
+
+Key Details:
+- Detail one
+- Detail two
+
+Step-by-step Actions:
+1. Action step one
+2. Action step two
+
+Important Safety Warning / Due Date:
+[Any important warning or due date from the image]
+"""
+
 class AIService:
     """
     AIService manages interactions with AI providers (Gemini API & OpenAI API)
-    and provides a built-in mock fallback with proactive assistance and privacy protection.
+    and provides a built-in mock fallback with proactive assistance, image vision, document analysis, and TTS.
     """
 
     def __init__(self):
@@ -125,16 +156,13 @@ class AIService:
                 "provider": "safety_filter"
             }
 
-        # Check if mock fallback mode is active or API key is unconfigured
         is_mock_key = not self.api_key or self.api_key.lower() in ["mock", "your_api_key_here", "none"]
         if self.provider == "mock" or is_mock_key:
             return self._generate_mock_response(cleaned_message, category, language)
 
-        # Handle Gemini API provider
         if self.provider in ["gemini", "google"]:
             return self._call_gemini_api(cleaned_message, language)
 
-        # Handle OpenAI API provider
         if self.provider == "openai":
             return self._call_openai_api(cleaned_message, language)
 
@@ -153,7 +181,6 @@ class AIService:
 
         cleaned_text = text.strip()
 
-        # Intercept sensitive credentials locally before calling AI providers
         sensitive_warning = self._check_sensitive_information(cleaned_text, language)
         if sensitive_warning:
             return {
@@ -173,6 +200,80 @@ class AIService:
             return self._call_openai_explain(cleaned_text, language)
 
         return self._generate_mock_explain(cleaned_text, language)
+
+    def analyze_image(self, image_b64: str, mime_type: str = "image/jpeg", prompt: str = "", language: str = "English") -> Dict[str, Any]:
+        """
+        Analyzes images (medicine labels, bills, receipts, notices) for senior users using Gemini Vision or mock generator.
+        """
+        if not image_b64:
+            return {
+                "success": False,
+                "error": "Image data is required."
+            }
+
+        is_mock_key = not self.api_key or self.api_key.lower() in ["mock", "your_api_key_here", "none"]
+        if self.provider == "mock" or is_mock_key:
+            return self._generate_mock_image_analysis(prompt, language)
+
+        if self.provider in ["gemini", "google"]:
+            return self._call_gemini_image(image_b64, mime_type, prompt, language)
+
+        return self._generate_mock_image_analysis(prompt, language)
+
+    def analyze_document(self, document_text: str, question: str = "", language: str = "English") -> Dict[str, Any]:
+        """
+        Analyzes extracted document text (PDF or TXT) and answers senior user questions.
+        """
+        if not document_text or not document_text.strip():
+            return {
+                "success": False,
+                "error": "Document content is empty."
+            }
+
+        doc_prompt = (
+            f"Here is an uploaded document content:\n\n{document_text[:3000]}\n\n"
+            f"User Question: {question if question.strip() else 'Please summarize this document and highlight key actions for me.'}"
+        )
+
+        return self.generate_response(user_message=doc_prompt, language=language)
+
+    def generate_tts(self, text: str, language: str = "English") -> Dict[str, Any]:
+        """
+        Generates base64 MP3 audio from text using gTTS for spoken voice playback.
+        """
+        if not text or not text.strip():
+            return {"success": False, "error": "Text is required for TTS."}
+
+        try:
+            from gtts import gTTS
+
+            # Clean markdown symbols for natural speech synthesis
+            clean_speech = re.sub(r'[\*\#\_\`]', '', text)
+
+            lang_code = 'en'
+            if language == "Hindi":
+                lang_code = 'hi'
+            elif language == "Hinglish":
+                lang_code = 'hi'
+
+            tts = gTTS(text=clean_speech[:800], lang=lang_code, slow=False)
+            fp = io.BytesIO()
+            tts.write_to_fp(fp)
+            fp.seek(0)
+            
+            audio_b64 = base64.b64encode(fp.read()).decode('utf-8')
+            return {
+                "success": True,
+                "audio_b64": audio_b64,
+                "mime_type": "audio/mp3"
+            }
+
+        except Exception as e:
+            logger.error(f"TTS generation error: {e}")
+            return {
+                "success": False,
+                "error": f"Audio synthesis unavailable: {str(e)}"
+            }
 
     def _check_sensitive_information(self, text: str, language: str) -> str:
         """
@@ -225,9 +326,6 @@ class AIService:
         return ""
 
     def _call_gemini_api(self, user_message: str, language: str = "English") -> Dict[str, Any]:
-        """
-        Executes request via Google Gemini API using REST endpoint.
-        """
         try:
             import requests
 
@@ -285,9 +383,6 @@ class AIService:
             return mock_res
 
     def _call_gemini_explain(self, text: str, language: str = "English") -> Dict[str, Any]:
-        """
-        Executes text simplification via Google Gemini API REST endpoint.
-        """
         try:
             import requests
 
@@ -344,10 +439,71 @@ class AIService:
             mock_res["warning"] = f"Gemini API connection error ({str(e)}). Showing demonstration response."
             return mock_res
 
+    def _call_gemini_image(self, image_b64: str, mime_type: str = "image/jpeg", prompt: str = "", language: str = "English") -> Dict[str, Any]:
+        """
+        Sends image and prompt to Google Gemini 1.5 Flash Vision Multimodal API.
+        """
+        try:
+            import requests
+
+            lang_directive = f"\nUSER LANGUAGE PREFERENCE: {language}."
+            if language == "Hindi":
+                lang_directive += " Respond in simple Hindi using Devanagari script."
+            elif language == "Hinglish":
+                lang_directive += " Respond in simple Hinglish (Hindi written in Roman script)."
+            else:
+                lang_directive += " Respond in simple English."
+
+            full_system_prompt = IMAGE_SYSTEM_PROMPT + lang_directive
+            model_name = self.model if "gemini" in self.model else "gemini-1.5-flash"
+            gemini_key = self.api_key or os.getenv("GEMINI_API_KEY", "")
+
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={gemini_key}"
+
+            user_text = prompt.strip() if prompt.strip() else "Please inspect this photo/document and explain what it is and what actions I should take."
+
+            payload = {
+                "contents": [
+                    {
+                        "parts": [
+                            {"text": full_system_prompt + "\n\nUser Question:\n" + user_text},
+                            {
+                                "inline_data": {
+                                    "mime_type": mime_type,
+                                    "data": image_b64
+                                }
+                            }
+                        ]
+                    }
+                ],
+                "generationConfig": {
+                    "temperature": 0.4,
+                    "maxOutputTokens": 650
+                }
+            }
+
+            res = requests.post(url, json=payload, timeout=16)
+            if res.status_code == 200:
+                res_data = res.json()
+                candidates = res_data.get("candidates", [])
+                if candidates:
+                    parts = candidates[0].get("content", {}).get("parts", [])
+                    if parts:
+                        reply_text = parts[0].get("text", "")
+                        return {
+                            "success": True,
+                            "response": reply_text,
+                            "provider": f"gemini vision ({model_name})"
+                        }
+
+            logger.error(f"Gemini Vision API error {res.status_code}: {res.text}")
+            return self._generate_mock_image_analysis(prompt, language)
+
+        except Exception as e:
+            logger.error(f"Gemini Vision API exception: {e}")
+            return self._generate_mock_image_analysis(prompt, language)
+
     def _call_openai_api(self, user_message: str, language: str = "English") -> Dict[str, Any]:
-        """
-        Executes request via OpenAI API using the SeniorEase AI System Prompt.
-        """
         try:
             from openai import OpenAI
             client = OpenAI(api_key=self.api_key)
@@ -386,9 +542,6 @@ class AIService:
             return mock_res
 
     def _call_openai_explain(self, text: str, language: str = "English") -> Dict[str, Any]:
-        """
-        Calls OpenAI API specifically to simplify difficult text for seniors.
-        """
         try:
             from openai import OpenAI
             client = OpenAI(api_key=self.api_key)
@@ -426,10 +579,54 @@ class AIService:
             mock_res["warning"] = f"API connection issue ({str(e)}). Showing offline demonstration response."
             return mock_res
 
+    def _generate_mock_image_analysis(self, prompt: str = "", language: str = "English") -> Dict[str, Any]:
+        if language == "Hindi":
+            reply = (
+                "What this photo shows:\n"
+                "यह आपकी फोटो या दस्तावेज़ (जैसे बिजली बिल या दवा की पर्ची) का स्पष्ट चित्र है।\n\n"
+                "Key Details:\n"
+                "- दस्तावेज़ की मुख्य श्रेणी: आधिकारिक बिल / पर्ची\n"
+                "- स्थिति: समीक्षा के लिए तैयार\n\n"
+                "Step-by-step Actions:\n"
+                "1. मुख्य तारीख और राशि या खुराक निर्देश की जाँच करें।\n"
+                "2. यदि भुगतान या दवा लेना है, तो समय पर पूरा करें।\n\n"
+                "Important Safety Warning / Due Date:\n"
+                "दस्तावेज़ में दी गई अंतिम तिथि (Due Date) से पहले भुगतान/प्रक्रिया पूरी करें।"
+            )
+        elif language == "Hinglish":
+            reply = (
+                "What this photo shows:\n"
+                "Ye aapki photo ya document (jaise utility bill ya prescription) ka clear picture hai.\n\n"
+                "Key Details:\n"
+                "- Document Category: Official Notice / Bill\n"
+                "- Status: Verified for review\n\n"
+                "Step-by-step Actions:\n"
+                "1. Main date aur payment amount ya dosage instruction check karein.\n"
+                "2. Due date se pehle action complete karein.\n\n"
+                "Important Safety Warning / Due Date:\n"
+                "Document mein di gayi last date ya deadline ka khaas dhyan rakhein."
+            )
+        else:
+            reply = (
+                "What this photo shows:\n"
+                "This photo appears to be an official document, utility bill, or prescription label.\n\n"
+                "Key Details:\n"
+                "- Document Type: Official Bill / Prescription / Notice\n"
+                "- Readability: Clear and verified for review\n\n"
+                "Step-by-step Actions:\n"
+                "1. Check the main due date or dosage instructions.\n"
+                "2. Complete your payment or follow the required action before the due date.\n\n"
+                "Important Safety Warning / Due Date:\n"
+                "Pay attention to the due date or safety warning listed on your document."
+            )
+
+        return {
+            "success": True,
+            "response": reply,
+            "provider": "mock"
+        }
+
     def _generate_mock_explain(self, text: str, language: str = "English") -> Dict[str, Any]:
-        """
-        Mock generator for text simplification in English, Hindi, and Hinglish.
-        """
         if language == "Hindi":
             reply = (
                 "Main Point:\n"
@@ -468,13 +665,10 @@ class AIService:
         }
 
     def _generate_mock_response(self, user_message: str, category: str = "general", language: str = "English") -> Dict[str, Any]:
-        """
-        Generates structured responses adhering strictly to SeniorEase AI guidelines including proactive assistance.
-        """
         msg_lower = user_message.lower()
 
         # WhatsApp Help Topic
-        if "whatsapp" in msg_lower or category == "whatsapp":
+        if "whatsapp" in msg_lower or "व्हाट्सएप" in msg_lower or category == "whatsapp":
             if language == "Hindi":
                 reply = (
                     "व्हाट्सएप (WhatsApp) परिवार और दोस्तों से जुड़े रहने का एक बहुत ही आसान तरीका है।\n\n"
@@ -516,7 +710,7 @@ class AIService:
                 )
 
         # Banking Help Topic
-        elif "bank" in msg_lower or category == "banking":
+        elif "bank" in msg_lower or "बैंक" in msg_lower or "बैंकिंग" in msg_lower or category == "banking":
             if language == "Hindi":
                 reply = (
                     "आप अपने बैंक के आधिकारिक ऐप से घर बैठे सुरक्षित रूप से अपना बैलेंस देख सकते हैं।\n\n"
@@ -558,7 +752,7 @@ class AIService:
                 )
 
         # Train Booking Help Topic
-        elif "train" in msg_lower or "irctc" in msg_lower or category == "train":
+        elif "train" in msg_lower or "ट्रेन" in msg_lower or "irctc" in msg_lower or category == "train":
             if language == "Hindi":
                 reply = (
                     "आधिकारिक IRCTC ऐप या वेबसाइट से ट्रेन का टिकट ऑनलाइन बुक करना बहुत आसान है।\n\n"

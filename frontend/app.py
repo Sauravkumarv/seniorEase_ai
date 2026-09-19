@@ -1,9 +1,15 @@
 import streamlit as st
 import requests
+import base64
+import io
+import pypdf
 
 # Backend REST API Endpoints
 BACKEND_URL = "http://localhost:5000/api/chat"
 EXPLAIN_URL = "http://localhost:5000/api/explain"
+IMAGE_URL = "http://localhost:5000/api/analyze-image"
+DOC_URL = "http://localhost:5000/api/analyze-doc"
+TTS_URL = "http://localhost:5000/api/tts"
 
 # Streamlit Page Configuration - Clean, Centered, Professional
 st.set_page_config(
@@ -86,14 +92,23 @@ CUSTOM_SENIOR_CSS = """
         margin: 0 !important;
     }
 
-    /* Quick Help Section Container Card */
-    .quick-help-card {
-        background-color: #FFFFFF;
-        border: 2px solid #E2E8F0;
-        border-radius: 16px;
-        padding: 24px;
-        margin-bottom: 24px;
-        box-shadow: 0 3px 10px rgba(0, 0, 0, 0.03);
+    /* Tabs styling for clear separation */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 10px;
+    }
+
+    .stTabs [data-baseweb="tab"] {
+        font-size: 21px !important;
+        font-weight: 700 !important;
+        padding: 12px 20px !important;
+        border-radius: 12px 12px 0 0 !important;
+        background-color: #E2E8F0 !important;
+        color: #1E293B !important;
+    }
+
+    .stTabs [aria-selected="true"] {
+        background-color: #2563EB !important;
+        color: #FFFFFF !important;
     }
 
     /* Large Quick-Help Buttons Styling */
@@ -117,7 +132,7 @@ CUSTOM_SENIOR_CSS = """
     }
 
     /* Primary Action Buttons */
-    div.stButton > button[key="ask_button"], div.stButton > button[key="explain_button"] {
+    div.stButton > button[key="ask_button"], div.stButton > button[key="explain_button"], div.stButton > button[key="img_button"], div.stButton > button[key="doc_button"] {
         background-color: #2563EB !important;
         color: #FFFFFF !important;
         font-size: 22px !important;
@@ -131,10 +146,6 @@ CUSTOM_SENIOR_CSS = """
         margin-bottom: 20px !important;
     }
 
-    div.stButton > button[key="ask_button"]:hover, div.stButton > button[key="explain_button"]:hover {
-        background-color: #1D4ED8 !important;
-    }
-
     /* Secondary Utility Buttons */
     div.stButton > button[key="new_q_btn"], div.stButton > button[key="clear_conv_btn"] {
         background-color: #F1F5F9 !important;
@@ -144,7 +155,7 @@ CUSTOM_SENIOR_CSS = """
         border: 2px solid #94A3B8 !important;
     }
 
-    /* Large Textarea Styling */
+    /* Large Textarea & File Uploader Styling */
     .stTextArea textarea {
         font-size: 22px !important;
         line-height: 1.6 !important;
@@ -155,23 +166,11 @@ CUSTOM_SENIOR_CSS = """
         color: #0F172A !important;
     }
 
-    .stTextArea textarea:focus {
-        border-color: #2563EB !important;
-        box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.2) !important;
-    }
-
-    .stTextArea label {
+    .stTextArea label, .stFileUploader label {
         font-size: 22px !important;
         font-weight: 700 !important;
         color: #1E293B !important;
         margin-bottom: 8px !important;
-    }
-
-    /* Radio Selector Styling for Language */
-    .stRadio label {
-        font-size: 21px !important;
-        font-weight: 600 !important;
-        color: #1E293B !important;
     }
 
     /* User Question Card */
@@ -226,6 +225,26 @@ if "conversation_history" not in st.session_state:
 
 if "input_box_value" not in st.session_state:
     st.session_state.input_box_value = ""
+
+if "active_audio" not in st.session_state:
+    st.session_state.active_audio = {}
+
+# Helper function to request Audio TTS from backend
+def play_audio_response(msg_idx: int, text_content: str, selected_lang: str):
+    try:
+        payload = {"text": text_content, "language": selected_lang}
+        response = requests.post(TTS_URL, json=payload, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                audio_b64 = data.get("audio_b64")
+                st.session_state.active_audio[msg_idx] = base64.b64decode(audio_b64)
+            else:
+                st.error("Audio synthesis failed.")
+        else:
+            st.error("Unable to generate audio.")
+    except Exception as e:
+        st.error(f"TTS connection error: {e}")
 
 # Function to submit chat question to Flask REST API
 def submit_question(user_query: str, selected_lang: str, category_name: str = "general"):
@@ -303,6 +322,77 @@ def submit_explain(text_to_explain: str, selected_lang: str):
             "Unable to connect to the assistant. Please make sure the Flask server is running."
         )
 
+# Function to submit image for analysis
+def submit_image_analysis(image_b64: str, mime_type: str, prompt_text: str, selected_lang: str):
+    st.session_state.conversation_history.append({
+        "role": "user",
+        "content": f"🖼️ Photo Analysis Request:\n{prompt_text if prompt_text else 'Please inspect and explain this photo.'}"
+    })
+
+    try:
+        payload = {
+            "image_base64": image_b64,
+            "mime_type": mime_type,
+            "prompt": prompt_text,
+            "language": selected_lang
+        }
+        response = requests.post(IMAGE_URL, json=payload, timeout=16)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                analysis = data.get("response", "Image analysis completed.")
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": analysis
+                })
+            else:
+                st.session_state.error_message = data.get("message", "Unable to analyze image.")
+        else:
+            st.session_state.error_message = (
+                "Unable to connect to the assistant. Please make sure the Flask server is running."
+            )
+
+    except requests.exceptions.RequestException:
+        st.session_state.error_message = (
+            "Unable to connect to the assistant. Please make sure the Flask server is running."
+        )
+
+# Function to submit document for analysis
+def submit_doc_analysis(doc_text: str, doc_name: str, user_question: str, selected_lang: str):
+    st.session_state.conversation_history.append({
+        "role": "user",
+        "content": f"📄 Document Analysis ({doc_name}):\n{user_question if user_question else 'Please summarize and explain this document.'}"
+    })
+
+    try:
+        payload = {
+            "document_text": doc_text,
+            "question": user_question,
+            "language": selected_lang
+        }
+        response = requests.post(DOC_URL, json=payload, timeout=14)
+
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("success"):
+                doc_analysis = data.get("response", "Document analysis completed.")
+                st.session_state.conversation_history.append({
+                    "role": "assistant",
+                    "content": doc_analysis
+                })
+            else:
+                st.session_state.error_message = data.get("message", "Unable to analyze document.")
+        else:
+            st.session_state.error_message = (
+                "Unable to connect to the assistant. Please make sure the Flask server is running."
+            )
+
+    except requests.exceptions.RequestException:
+        st.session_state.error_message = (
+            "Unable to connect to the assistant. Please make sure the Flask server is running."
+        )
+
 # 1. TOP HEADER SECTION
 st.markdown(
     """
@@ -327,10 +417,7 @@ st.markdown(
 
 st.divider()
 
-# 3. MAIN SECTION: "How can I help you today?"
-st.markdown('<div class="section-title">How can I help you today?</div>', unsafe_allow_html=True)
-
-# LANGUAGE SELECTOR
+# 3. LANGUAGE SELECTOR
 selected_language = st.radio(
     "Choose Language / भाषा चुनें:",
     options=["English", "Hindi", "Hinglish"],
@@ -340,129 +427,221 @@ selected_language = st.radio(
 
 st.write("") # Spacing
 
-# 4. QUICK HELP BUTTONS CARD CONTAINER
-st.markdown('**Tap a quick help topic below:**')
+# 4. TAB NAVIGATION FOR FEATURES
+tab1, tab2, tab3, tab4 = st.tabs([
+    "💬 Ask & Voice Chat",
+    "🖼️ Photo & Image Reader",
+    "📄 Document Reader & Q&A",
+    "📖 Explain Something"
+])
 
-# Updated Example Questions per Language & Topic
-EXAMPLE_QUESTIONS = {
-    "English": {
-        "whatsapp": "How do I send a photo to someone on WhatsApp?",
-        "banking": "How can I check my bank balance safely online?",
-        "train": "How can I book a train ticket online?",
-        "email": "How do I send an email with an attachment?",
-        "shopping": "How do I safely order something online?",
-        "gov": "How can I find the official website for a government service?"
-    },
-    "Hindi": {
-        "whatsapp": "व्हाट्सएप पर किसी को फोटो कैसे भेजें?",
-        "banking": "ऑनलाइन अपना बैंक बैलेंस सुरक्षित रूप से कैसे देखें?",
-        "train": "ऑनलाइन ट्रेन का टिकट कैसे बुक करें?",
-        "email": "फाइल या फोटो के साथ ईमेल (Attachment) कैसे भेजें?",
-        "shopping": "ऑनलाइन सुरक्षित रूप से कोई सामान कैसे मंगवाएं?",
-        "gov": "किसी सरकारी सेवा की आधिकारिक वेबसाइट कैसे खोजें?"
-    },
-    "Hinglish": {
-        "whatsapp": "WhatsApp par kisi ko photo kaise bhejein?",
-        "banking": "Online apna bank balance safe tareeke se kaise dekhein?",
-        "train": "Online train ticket kaise book karein?",
-        "email": "Attachment ke saath email kaise bhejein?",
-        "shopping": "Online safe tareeke se koi saman kaise order karein?",
-        "gov": "Kisi government service ki official website kaise khojein?"
+# --- TAB 1: ASK & VOICE CHAT ---
+with tab1:
+    st.markdown('<div class="section-title">How can I help you today?</div>', unsafe_allow_html=True)
+    
+    # 🎙️ Audio Input / Voice Communication
+    st.markdown("**🎙️ Speak your question (Voice Input):**")
+    try:
+        audio_val = st.audio_input("Record voice question", key="voice_recorder")
+        if audio_val:
+            st.info("🎙️ Voice recorded! Click 'Ask SeniorEase' or type additional notes below.")
+    except Exception:
+        pass
+
+    # Quick Help Category Buttons
+    st.markdown('**Tap a quick help topic below:**')
+
+    EXAMPLE_QUESTIONS = {
+        "English": {
+            "whatsapp": "How do I send a photo to someone on WhatsApp?",
+            "banking": "How can I check my bank balance safely online?",
+            "train": "How can I book a train ticket online?",
+            "email": "How do I send an email with an attachment?",
+            "shopping": "How do I safely order something online?",
+            "gov": "How can I find the official website for a government service?"
+        },
+        "Hindi": {
+            "whatsapp": "व्हाट्सएप पर किसी को फोटो कैसे भेजें?",
+            "banking": "ऑनलाइन अपना बैंक बैलेंस सुरक्षित रूप से कैसे देखें?",
+            "train": "ऑनलाइन ट्रेन का टिकट कैसे बुक करें?",
+            "email": "फाइल या फोटो के साथ ईमेल (Attachment) कैसे भेजें?",
+            "shopping": "ऑनलाइन सुरक्षित रूप से कोई सामान कैसे मंगवाएं?",
+            "gov": "किसी सरकारी सेवा की आधिकारिक वेबसाइट कैसे खोजें?"
+        },
+        "Hinglish": {
+            "whatsapp": "WhatsApp par kisi ko photo kaise bhejein?",
+            "banking": "Online apna bank balance safe tareeke se kaise dekhein?",
+            "train": "Online train ticket kaise book karein?",
+            "email": "Attachment ke saath email kaise bhejein?",
+            "shopping": "Online safe tareeke se koi saman kaise order karein?",
+            "gov": "Kisi government service ki official website kaise khojein?"
+        }
     }
-}
 
-col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-with col1:
-    if st.button("📱 WhatsApp", use_container_width=True):
-        q = EXAMPLE_QUESTIONS[selected_language]["whatsapp"]
-        st.session_state.input_box_value = q
-        submit_question(q, selected_language, category_name="whatsapp")
-        st.rerun()
+    with col1:
+        if st.button("📱 WhatsApp", use_container_width=True):
+            q = EXAMPLE_QUESTIONS[selected_language]["whatsapp"]
+            st.session_state.input_box_value = q
+            submit_question(q, selected_language, category_name="whatsapp")
+            st.rerun()
 
-    if st.button("💳 Banking", use_container_width=True):
-        q = EXAMPLE_QUESTIONS[selected_language]["banking"]
-        st.session_state.input_box_value = q
-        submit_question(q, selected_language, category_name="banking")
-        st.rerun()
+        if st.button("💳 Banking", use_container_width=True):
+            q = EXAMPLE_QUESTIONS[selected_language]["banking"]
+            st.session_state.input_box_value = q
+            submit_question(q, selected_language, category_name="banking")
+            st.rerun()
 
-    if st.button("🚆 Train Booking", use_container_width=True):
-        q = EXAMPLE_QUESTIONS[selected_language]["train"]
-        st.session_state.input_box_value = q
-        submit_question(q, selected_language, category_name="train")
-        st.rerun()
+        if st.button("🚆 Train Booking", use_container_width=True):
+            q = EXAMPLE_QUESTIONS[selected_language]["train"]
+            st.session_state.input_box_value = q
+            submit_question(q, selected_language, category_name="train")
+            st.rerun()
 
-with col2:
-    if st.button("📧 Email", use_container_width=True):
-        q = EXAMPLE_QUESTIONS[selected_language]["email"]
-        st.session_state.input_box_value = q
-        submit_question(q, selected_language, category_name="email")
-        st.rerun()
+    with col2:
+        if st.button("📧 Email", use_container_width=True):
+            q = EXAMPLE_QUESTIONS[selected_language]["email"]
+            st.session_state.input_box_value = q
+            submit_question(q, selected_language, category_name="email")
+            st.rerun()
 
-    if st.button("🛒 Online Shopping", use_container_width=True):
-        q = EXAMPLE_QUESTIONS[selected_language]["shopping"]
-        st.session_state.input_box_value = q
-        submit_question(q, selected_language, category_name="shopping")
-        st.rerun()
+        if st.button("🛒 Online Shopping", use_container_width=True):
+            q = EXAMPLE_QUESTIONS[selected_language]["shopping"]
+            st.session_state.input_box_value = q
+            submit_question(q, selected_language, category_name="shopping")
+            st.rerun()
 
-    if st.button("🏛️ Government Services", use_container_width=True):
-        q = EXAMPLE_QUESTIONS[selected_language]["gov"]
-        st.session_state.input_box_value = q
-        submit_question(q, selected_language, category_name="gov")
-        st.rerun()
+        if st.button("🏛️ Government Services", use_container_width=True):
+            q = EXAMPLE_QUESTIONS[selected_language]["gov"]
+            st.session_state.input_box_value = q
+            submit_question(q, selected_language, category_name="gov")
+            st.rerun()
 
-st.write("") # Spacing
+    st.write("") # Spacing
 
-# 5. LARGE QUESTION INPUT AREA
-user_question_input = st.text_area(
-    label="Type your question here...",
-    placeholder="Type your question here...",
-    value=st.session_state.input_box_value,
-    height=130
-)
+    user_question_input = st.text_area(
+        label="Type your question here...",
+        placeholder="Type your question here...",
+        value=st.session_state.input_box_value,
+        height=130,
+        key="main_q_textarea"
+    )
 
-# 6. ACTION BUTTON TOOLBAR: ASK BUTTON & START NEW QUESTION
-ask_col, action_col = st.columns([2, 1])
+    ask_col, action_col = st.columns([2, 1])
 
-with ask_col:
-    if st.button("Ask SeniorEase", key="ask_button"):
-        if user_question_input and user_question_input.strip():
-            submit_question(user_question_input, selected_language)
+    with ask_col:
+        if st.button("Ask SeniorEase", key="ask_button"):
+            if user_question_input and user_question_input.strip():
+                submit_question(user_question_input, selected_language)
+                st.session_state.input_box_value = ""
+                st.rerun()
+            else:
+                st.warning("Please type a question or tap one of the quick help buttons above.")
+
+    with action_col:
+        if st.button("✏️ Start New Question", key="new_q_btn", use_container_width=True):
             st.session_state.input_box_value = ""
             st.rerun()
+
+# --- TAB 2: PHOTO & IMAGE READER ---
+with tab2:
+    st.markdown('<div class="section-title">🖼️ Upload Photo / Image for Analysis</div>', unsafe_allow_html=True)
+    st.info("💡 Upload photos of medicine labels, electricity bills, receipts, or official letters.")
+
+    uploaded_image = st.file_uploader(
+        "Select photo or image file:",
+        type=["png", "jpg", "jpeg"],
+        key="img_uploader"
+    )
+
+    image_prompt = st.text_area(
+        label="What would you like to know about this photo?",
+        placeholder="e.g., What is the dosage instruction? Or how much is the bill amount due?",
+        height=100,
+        key="img_prompt_area"
+    )
+
+    if uploaded_image is not None:
+        st.image(uploaded_image, caption="Uploaded Image Preview", use_column_width=True)
+
+        if st.button("Analyze Photo / Image", key="img_button"):
+            with st.spinner("⏳ SeniorEase AI is inspecting your image..."):
+                img_bytes = uploaded_image.getvalue()
+                img_b64 = base64.b64encode(img_bytes).decode('utf-8')
+                mime_type = uploaded_image.type or "image/jpeg"
+                submit_image_analysis(img_b64, mime_type, image_prompt, selected_language)
+                st.rerun()
+
+# --- TAB 3: DOCUMENT READER & Q&A ---
+with tab3:
+    st.markdown('<div class="section-title">📄 Upload Document (PDF / Text)</div>', unsafe_allow_html=True)
+    st.info("💡 Upload pension forms, bank statements, or official PDF notices.")
+
+    uploaded_doc = st.file_uploader(
+        "Select PDF or Text document file:",
+        type=["pdf", "txt"],
+        key="doc_uploader"
+    )
+
+    doc_question = st.text_area(
+        label="What question do you have about this document?",
+        placeholder="e.g., What is the last date to submit this form?",
+        height=100,
+        key="doc_question_area"
+    )
+
+    if uploaded_doc is not None:
+        st.success(f"📄 Loaded document: {uploaded_doc.name}")
+
+        if st.button("Analyze Document", key="doc_button"):
+            with st.spinner("⏳ SeniorEase AI is reading your document..."):
+                try:
+                    doc_bytes = uploaded_doc.getvalue()
+                    doc_text = ""
+
+                    if uploaded_doc.name.endswith(".pdf"):
+                        pdf_reader = pypdf.PdfReader(io.BytesIO(doc_bytes))
+                        for page in pdf_reader.pages:
+                            text = page.extract_text()
+                            if text:
+                                doc_text += text + "\n"
+                    else:
+                        doc_text = doc_bytes.decode('utf-8', errors='ignore')
+
+                    if doc_text.strip():
+                        submit_doc_analysis(doc_text, uploaded_doc.name, doc_question, selected_language)
+                        st.rerun()
+                    else:
+                        st.error("Could not extract readable text from this document file.")
+
+                except Exception as e:
+                    st.error(f"Error processing document file: {e}")
+
+# --- TAB 4: EXPLAIN SOMETHING SIMPLY ---
+with tab4:
+    st.markdown('<div class="section-title">📖 Explain Something Simply</div>', unsafe_allow_html=True)
+
+    explain_input_area = st.text_area(
+        label="Paste any difficult message, notice or instruction here...",
+        placeholder="Paste any difficult message, notice or instruction here...",
+        height=130,
+        key="explain_text_input"
+    )
+
+    if st.button("Explain Simply", key="explain_button"):
+        if explain_input_area and explain_input_area.strip():
+            submit_explain(explain_input_area, selected_language)
+            st.rerun()
         else:
-            st.warning("Please type a question or tap one of the quick help buttons above.")
-
-with action_col:
-    if st.button("✏️ Start New Question", key="new_q_btn", use_container_width=True):
-        st.session_state.input_box_value = ""
-        st.rerun()
-
-st.divider()
-
-# 7. FEATURE: EXPLAIN SOMETHING SIMPLY SECTION
-st.markdown('<div class="section-title">📖 Explain Something Simply</div>', unsafe_allow_html=True)
-
-explain_input_area = st.text_area(
-    label="Paste any difficult message, notice or instruction here...",
-    placeholder="Paste any difficult message, notice or instruction here...",
-    height=130,
-    key="explain_text_input"
-)
-
-if st.button("Explain Simply", key="explain_button"):
-    if explain_input_area and explain_input_area.strip():
-        submit_explain(explain_input_area, selected_language)
-        st.rerun()
-    else:
-        st.warning("Please paste some text above to explain.")
+            st.warning("Please paste some text above to explain.")
 
 # 8. BACKEND ERROR DISPLAY
 if "error_message" in st.session_state and st.session_state.error_message:
     st.error(st.session_state.error_message)
     del st.session_state["error_message"]
 
-# 9. CONVERSATION CARDS SECTION
+# 9. CONVERSATION CARDS SECTION WITH AUDIO SPOKEN RESPONSE BUTTONS
 if st.session_state.conversation_history:
     st.divider()
     
@@ -473,6 +652,7 @@ if st.session_state.conversation_history:
         if st.button("🗑️ Clear Conversation", key="clear_conv_btn", use_container_width=True):
             st.session_state.conversation_history = []
             st.session_state.input_box_value = ""
+            st.session_state.active_audio = {}
             st.rerun()
 
     for idx, msg in enumerate(st.session_state.conversation_history):
@@ -496,3 +676,11 @@ if st.session_state.conversation_history:
                 """,
                 unsafe_allow_html=True
             )
+
+            # Audio Spoken Voice Button for Elderly Users
+            audio_btn_key = f"tts_btn_{idx}"
+            if st.button("🔊 Listen to Answer (Spoken Audio)", key=audio_btn_key):
+                play_audio_response(idx, msg["content"], selected_language)
+
+            if idx in st.session_state.active_audio:
+                st.audio(st.session_state.active_audio[idx], format="audio/mp3")

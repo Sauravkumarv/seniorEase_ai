@@ -27,11 +27,14 @@ def create_app() -> Flask:
     def index():
         return jsonify({
             "name": "SeniorEase AI Backend REST API",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "endpoints": {
                 "health": "/api/health",
                 "chat": "/api/chat (POST)",
-                "explain": "/api/explain (POST)"
+                "explain": "/api/explain (POST)",
+                "analyze_image": "/api/analyze-image (POST)",
+                "analyze_doc": "/api/analyze-doc (POST)",
+                "tts": "/api/tts (POST)"
             },
             "status": "running"
         }), 200
@@ -55,7 +58,6 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == '__main__':
-    # Determine port and debug settings from environment
     port = int(os.getenv('FLASK_PORT', 5000))
     debug = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
 
