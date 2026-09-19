@@ -1,18 +1,31 @@
+import os
 import streamlit as st
 import requests
 import base64
 import io
 import pypdf
 
+def _backend_base_url() -> str:
+    """Resolve Flask API base URL from Streamlit secrets, env, or local default."""
+    url = ""
+    try:
+        url = str(st.secrets.get("BACKEND_URL", "")).strip()
+    except Exception:
+        url = ""
+    url = url or os.getenv("BACKEND_URL", "http://127.0.0.1:5000").strip()
+    return url.rstrip("/")
+
+API_BASE = _backend_base_url()
+
 # Backend REST API Endpoints
-BACKEND_URL = "http://localhost:5000/api/chat"
-EXPLAIN_URL = "http://localhost:5000/api/explain"
-IMAGE_URL = "http://localhost:5000/api/analyze-image"
-DOC_URL = "http://localhost:5000/api/analyze-doc"
-DOC_UPLOAD_URL = "http://localhost:5000/api/document/upload"
-TTS_URL = "http://localhost:5000/api/tts"
-VOICE_TRANSCRIBE_URL = "http://localhost:5000/api/voice/transcribe"
-VOICE_SPEAK_URL = "http://localhost:5000/api/voice/speak"
+BACKEND_URL = f"{API_BASE}/api/chat"
+EXPLAIN_URL = f"{API_BASE}/api/explain"
+IMAGE_URL = f"{API_BASE}/api/analyze-image"
+DOC_URL = f"{API_BASE}/api/analyze-doc"
+DOC_UPLOAD_URL = f"{API_BASE}/api/document/upload"
+TTS_URL = f"{API_BASE}/api/tts"
+VOICE_TRANSCRIBE_URL = f"{API_BASE}/api/voice/transcribe"
+VOICE_SPEAK_URL = f"{API_BASE}/api/voice/speak"
 
 # Streamlit Page Configuration - Clean, Centered, Professional
 st.set_page_config(

@@ -1,6 +1,7 @@
 import os
 import sys
 from flask import Flask, jsonify
+from flask_cors import CORS
 from dotenv import load_dotenv
 
 # Ensure project root is in sys.path
@@ -19,6 +20,9 @@ def create_app() -> Flask:
     Application factory for initializing the Flask REST API backend.
     """
     app = Flask(__name__)
+
+    # Allow the Streamlit Cloud frontend (and local UI) to call this API
+    CORS(app, resources={r"/*": {"origins": "*"}})
 
     # Register blueprints
     app.register_blueprint(chat_bp)
@@ -58,8 +62,8 @@ def create_app() -> Flask:
 app = create_app()
 
 if __name__ == '__main__':
-    port = int(os.getenv('FLASK_PORT', 5000))
-    debug = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    port = int(os.getenv('PORT', os.getenv('FLASK_PORT', 5000)))
+    debug = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
 
     print(f"==================================================")
     print(f"[SeniorEase AI] Backend running on http://127.0.0.1:{port}")

@@ -6,23 +6,47 @@
 
 ## 🔗 Live Shared Link & Deployment
 
-### 🌐 Instant Shareable Public URL (Live Now)
-- **Public Shared URL**: [https://twenty-memes-glow.loca.lt](https://twenty-memes-glow.loca.lt)
-- **Tunnel Password (if prompted by loca.lt)**: `104.134.37.8`
+This app is two services: a **Streamlit frontend** and a **Flask backend**. The UI on Streamlit Cloud cannot use `localhost`. Deploy Flask publicly, then point Streamlit at that URL.
 
-### ☁️ Permanent Free Hosting (Streamlit Community Cloud)
-Your codebase is ready on GitHub: [https://github.com/Sauravkumarv/seniorEase_ai](https://github.com/Sauravkumarv/seniorEase_ai)
+GitHub repo: [https://github.com/Sauravkumarv/seniorEase_ai](https://github.com/Sauravkumarv/seniorEase_ai)
 
-To deploy a permanent 24/7 link:
+### 1. Deploy the Flask backend (Render — free)
+
+1. Push this repo to GitHub (include `Procfile` and `requirements.txt`).
+2. Open [https://render.com](https://render.com), sign in with GitHub, and click **New → Web Service**.
+3. Select this repository. Use:
+   - **Runtime**: Python
+   - **Build command**: `pip install -r requirements.txt`
+   - **Start command**: `gunicorn backend.app:app --bind 0.0.0.0:$PORT --timeout 120 --workers 1`
+4. Add environment variables (do not put keys in Streamlit):
+   ```text
+   AI_PROVIDER=gemini
+   AI_MODEL=gemini-1.5-flash
+   FLASK_DEBUG=False
+   GEMINI_API_KEY=your_gemini_key
+   AI_API_KEY=your_gemini_key
+   ```
+5. Deploy. Copy the public URL, for example `https://seniorease-ai-backend.onrender.com`.
+6. Open `/api/health` in a browser. You should see `"status": "healthy"`.
+
+Render’s free plan sleeps after idle time. The first request after sleep can take 30–60 seconds.
+
+### 2. Point the existing Streamlit app at the backend
+
+1. Open [https://share.streamlit.io](https://share.streamlit.io) → your app → **⋮ → Settings → Secrets**.
+2. Set only the backend URL (Gemini keys stay on Render):
+   ```toml
+   BACKEND_URL = "https://YOUR-RENDER-SERVICE.onrender.com"
+   ```
+3. Reboot / redeploy the Streamlit app.
+
+Local development still works with default `http://127.0.0.1:5000` if `BACKEND_URL` is unset.
+
+### ☁️ Streamlit Community Cloud (frontend only)
 1. Go to [share.streamlit.io](https://share.streamlit.io) and sign in.
 2. Click **"New app"** and select repository: `Sauravkumarv/seniorEase_ai`.
 3. Set **Main file path**: `frontend/app.py`.
-4. Click **Advanced Settings** -> **Secrets** and add:
-   ```toml
-   AI_PROVIDER = "gemini"
-   GEMINI_API_KEY = "your_key_here"
-   ```
-5. Click **Deploy!**
+4. Add the `BACKEND_URL` secret as above, then deploy.
 
 ---
 
