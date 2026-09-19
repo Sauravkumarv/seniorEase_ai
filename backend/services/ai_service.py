@@ -536,6 +536,9 @@ class AIService:
             return {"success": False, "error": "File content is required."}
 
         filename_lower = filename.lower()
+        if not (filename_lower.endswith(".pdf") or filename_lower.endswith(".docx") or filename_lower.endswith(".txt")):
+            return {"success": False, "error": "Unsupported file format. Please upload a PDF, DOCX, or TXT document."}
+
         extracted_text = ""
         page_count = 1
 
@@ -555,7 +558,7 @@ class AIService:
                 extracted_text = "\n".join([p.text for p in doc_obj.paragraphs if p.text])
                 page_count = max(1, len(doc_obj.paragraphs) // 15)
 
-            else:
+            elif filename_lower.endswith(".txt"):
                 extracted_text = file_bytes.decode('utf-8', errors='ignore')
                 page_count = max(1, len(extracted_text) // 2000)
 
